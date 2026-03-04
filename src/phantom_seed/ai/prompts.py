@@ -13,8 +13,8 @@ SYSTEM_PROMPT = """\
 4. **叙事结构**：每段剧情遵循"起→承→转"结构，在转折处结束，留下悬念。
 5. **禁止**: 不要在剧情中途出现选项，选项只在最后一条对话结束后提供。
 6. 严格按 JSON 格式输出，不输出任何 JSON 之外的内容。
-7. 根据 sanity 值调整氛围：sanity > 70 日常紧张，40-70 心理扭曲，< 40 恐怖崩溃。
-8. inner_monologue 必须大量使用，体现主角的心理活动、怀疑、情感波动。
+7. 根据 sanity 值调整氛围：sanity > 70 日常紧张，40-70 心理扭曲，< 40 恐怖崩溶。
+8. **剧情绝大部分通过对话推进**，减少动作/神态/外部描写；inner_monologue 仅在关键情绪转折处使用，每段不超过3-4条。
 
 ## 场景切换规则
 - 同一段剧情内可以有多个 stage_commands，在不同对话之间通过 scene_transition 标记切换场景。
@@ -33,7 +33,7 @@ SYSTEM_PROMPT = """\
     {
       "speaker": "角色名或「旁白」",
       "text": "台词内容，要足够长，体现人物性格",
-      "inner_monologue": "主角内心独白，可以很长；如果是NPC说话则填主角对这句话的心理反应",
+      "inner_monologue": "可选，仅在关键情绪转折时填写主角简短心理反应（一句话），其余留空",
       "scene_transition": "可选，下一条对话前切换的新背景英文描述；不切换则省略此字段"
     }
   ],
@@ -94,7 +94,8 @@ SCENE_GENERATION_PROMPT = """\
 ## 本次剧情生成要求
 - 必须输出 **25-45 条对话**（严格执行，少于20条视为失败）
 - 必须包含至少 **2次场景/地点切换**（使用 scene_transition 字段）
-- inner_monologue 至少有 **8条**不为空
+- **以对话为核心**：减少神态/动作/心理描写，台词本身要体现情绪和性格
+- inner_monologue 仅在情绪高潮处使用，全段不超过 3-4 条，其余留空字符串
 - 剧情要体现本幕的章节节拍（{chapter_beat}）
 - 在最后提供 **2-3 个选择分支**，选项要对剧情走向有实质影响
 
@@ -103,9 +104,9 @@ SCENE_GENERATION_PROMPT = """\
 
 VISUAL_PROMPT_TEMPLATE = """\
 anime style, visual novel character sprite, {description}, \
-full body standing pose, simple background, \
+full body standing pose, pure white background, no background elements, \
 high quality, detailed, clean lineart, soft lighting, \
-game CG illustration style\
+game CG illustration style, character reference sheet style\
 """
 
 CG_PROMPT_TEMPLATE = """\
@@ -119,4 +120,3 @@ anime visual novel background illustration, no characters, no people, {descripti
 detailed environment art, atmospheric lighting, wide establishing shot, \
 painterly style, high quality background art\
 """
-

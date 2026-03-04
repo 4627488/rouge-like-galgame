@@ -26,10 +26,20 @@ class CharacterSprite:
         self.shake_timer = 0
 
     def load(self, screen_h: int) -> None:
+        if self.surface is not None:
+            return  # already loaded, skip
         if self.sprite_path:
-            # Scale sprite to ~60% of screen height
-            target_h = int(screen_h * 0.6)
-            self.surface = load_image(self.sprite_path, (int(target_h * 0.5), target_h))
+            # Load at original resolution to get true aspect ratio
+            orig = load_image(self.sprite_path)
+            if orig:
+                target_h = int(screen_h * 0.78)
+                orig_w, orig_h = orig.get_size()
+                target_w = (
+                    int(orig_w * target_h / orig_h)
+                    if orig_h > 0
+                    else int(target_h * 0.55)
+                )
+                self.surface = pygame.transform.smoothscale(orig, (target_w, target_h))
         if self.surface is None:
             # Unique silhouette color per character based on their ID hash
             h_val = int(hashlib.md5(self.char_id.encode()).hexdigest()[:6], 16)
@@ -68,6 +78,7 @@ class CharacterSprite:
         # Apply shake
         if self.shake_timer > 0:
             import random
+
             x += random.randint(-3, 3)
             y += random.randint(-2, 2)
 
@@ -87,6 +98,8 @@ class SceneRenderer:
         self.screen_h = screen_h
         self.characters: dict[str, CharacterSprite] = {}
         self.background: pygame.Surface | None = None
+        # When True (CG scenes), character sprites are suppressed
+        self.hide_sprites: bool = False
         self.bg_path: str = ""
         # Main character sprite path — used as fallback for any unregistered ID
         self._main_sprite_path: Path | None = None
@@ -99,7 +112,9 @@ class SceneRenderer:
         if char_id not in self.characters:
             self.characters[char_id] = CharacterSprite(char_id, path)
         else:
-            self.characters[char_id].sprite_path = path
+            sprite = self.characters[char_id]
+            sprite.sprite_path = path
+            sprite.surface = None  # force reload with correct aspect ratio
 
     def _resolve_sprite_path(self, char_id: str) -> Path | None:
         """Return the best known sprite path for this char_id.
@@ -119,6 +134,10 @@ class SceneRenderer:
 
     def apply_scene(self, scene: SceneData) -> None:
         """Apply a scene's stage commands."""
+        # Hide character sprites for cinematic CG scenes
+        from phantom_seed.ai.protocol import VisualType
+        self.hide_sprites = (scene.visual_type == VisualType.CINEMATIC_CG)
+
         # Update background — only load real image files (AI-generated paths)
         if scene.background and scene.background != self.bg_path:
             self.bg_path = scene.background
@@ -150,7 +169,11 @@ class SceneRenderer:
             sprite.visible = True
             sprite.set_position(cmd.pos, self.screen_w)
             sprite.current_x = sprite.target_x
-            sprite.y = self.screen_h - (sprite.surface.get_height() if sprite.surface else 400) - 20
+            sprite.y = (
+                self.screen_h
+                - (sprite.surface.get_height() if sprite.surface else 400)
+                - 20
+            )
 
         elif cmd.action == StageAction.LEAVE:
             sprite.visible = False
@@ -169,8 +192,9 @@ class SceneRenderer:
         else:
             screen.fill((12, 8, 22))
 
-        # Sprites (sorted left to right)
-        visible = [s for s in self.characters.values() if s.visible]
-        visible.sort(key=lambda s: s.current_x)
-        for sprite in visible:
-            sprite.render(screen)
+        # Sprites hidden for CG scenes (CG image covers the full canvas)
+        if not self.hide_sprites:
+            visible = [s for s in self.characters.values() if s.visible]
+            visible.sort(key=lambda s: s.current_x)
+            for sprite in visible:
+                sprite.render(screen)

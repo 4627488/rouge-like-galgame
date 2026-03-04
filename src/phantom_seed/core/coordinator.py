@@ -16,7 +16,11 @@ from phantom_seed.ai.protocol import (
     VisualType,
 )
 from phantom_seed.core.roguelike import generate_memory_fragment, roll_random_event
-from phantom_seed.core.seed_engine import derive_initial_atmosphere, derive_trait_code, hash_seed
+from phantom_seed.core.seed_engine import (
+    derive_initial_atmosphere,
+    derive_trait_code,
+    hash_seed,
+)
 from phantom_seed.core.state import GameState
 
 if TYPE_CHECKING:
@@ -124,13 +128,17 @@ class GameCoordinator:
         # Generate first scene
         return self.get_next_scene()
 
-    def get_next_scene(self, player_choice: str = "", choice_delta: dict[str, int] | None = None) -> SceneData:
+    def get_next_scene(
+        self, player_choice: str = "", choice_delta: dict[str, int] | None = None
+    ) -> SceneData:
         """Generate the next scene, applying any choice effects."""
         if choice_delta:
             self.state.apply_delta(choice_delta)
 
         if self.state.is_game_over:
-            fragment = generate_memory_fragment(self.state.history, self.state.round_number)
+            fragment = generate_memory_fragment(
+                self.state.history, self.state.round_number
+            )
             self.state.memory_fragments.append(fragment)
             return self._game_over_scene()
 
@@ -158,7 +166,9 @@ class GameCoordinator:
 
         # Record history (multiple lines for longer scenes)
         if scene.script:
-            speakers = set(l.speaker for l in scene.script if l.speaker not in ("旁白", "系统"))
+            speakers = set(
+                l.speaker for l in scene.script if l.speaker not in ("旁白", "系统")
+            )
             summary = f"[场景{self.state.round_number}] {', '.join(speakers)} — {scene.script[0].text[:40]}"
             self.state.add_history(summary)
 
@@ -230,13 +240,17 @@ class GameCoordinator:
         # Generate first scene
         return self.get_next_scene()
 
-    def get_next_scene(self, player_choice: str = "", choice_delta: dict[str, int] | None = None) -> SceneData:
+    def get_next_scene(
+        self, player_choice: str = "", choice_delta: dict[str, int] | None = None
+    ) -> SceneData:
         """Generate the next scene, applying any choice effects."""
         if choice_delta:
             self.state.apply_delta(choice_delta)
 
         if self.state.is_game_over:
-            fragment = generate_memory_fragment(self.state.history, self.state.round_number)
+            fragment = generate_memory_fragment(
+                self.state.history, self.state.round_number
+            )
             self.state.memory_fragments.append(fragment)
             return self._game_over_scene()
 

@@ -99,19 +99,6 @@ class DialogueBox:
             self.box_w - 48,
         )
 
-        # Inner monologue (italic, dimmer)
-        if self.inner_text and self.finished:
-            mono_y = self.box_y + self.box_height - 45
-            self._render_wrapped_text(
-                screen,
-                f"({self.inner_text})",
-                self.mono_font,
-                (160, 160, 200),
-                self.margin + 24,
-                mono_y,
-                self.box_w - 48,
-            )
-
         # Click indicator
         if self.finished:
             indicator_x = self.margin + self.box_w - 40

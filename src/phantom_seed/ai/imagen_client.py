@@ -14,7 +14,11 @@ import httpx
 from openai import OpenAI
 from PIL import Image
 
-from phantom_seed.ai.prompts import BACKGROUND_PROMPT_TEMPLATE, CG_PROMPT_TEMPLATE, VISUAL_PROMPT_TEMPLATE
+from phantom_seed.ai.prompts import (
+    BACKGROUND_PROMPT_TEMPLATE,
+    CG_PROMPT_TEMPLATE,
+    VISUAL_PROMPT_TEMPLATE,
+)
 
 if TYPE_CHECKING:
     from phantom_seed.config import Config
@@ -38,7 +42,9 @@ class ImagenClient:
         h = hashlib.sha256(prompt.encode()).hexdigest()[:16]
         return self.cache_dir / f"{h}.png"
 
-    def _request_image(self, full_prompt: str, aspect_ratio: str = "2:3") -> Image.Image | None:
+    def _request_image(
+        self, full_prompt: str, aspect_ratio: str = "2:3"
+    ) -> Image.Image | None:
         """Send one image generation request and return a PIL Image or None."""
         response = self.client.chat.completions.create(
             model=self.model,
@@ -90,7 +96,11 @@ class ImagenClient:
         # Fallback: text-embedded base64 / URL
         text_content = msg.content if isinstance(msg.content, str) else ""
         if text_content:
-            log.debug("Image response text (%d chars): %s", len(text_content), text_content[:200])
+            log.debug(
+                "Image response text (%d chars): %s",
+                len(text_content),
+                text_content[:200],
+            )
             img = self._extract_image(text_content)
             if img:
                 return img
@@ -98,7 +108,58 @@ class ImagenClient:
         log.warning("No image in response. raw keys: %s", list(raw.keys()))
         return None
 
-    def generate_image(self, prompt: str, *, is_cg: bool = False, aspect_ratio: str = "2:3", template: str | None = None) -> Path | None:
+    @staticmethod
+    def _remove_white_bg(
+        img: Image.Image, threshold: int = 240, tolerance: int = 30
+    ) -> Image.Image:
+        """Remove white/near-white background using corner flood-fill, returning RGBA image."""
+        rgba = img.convert("RGBA")
+        w, h = rgba.size
+        pixels = rgba.load()
+
+        # Determine background color by sampling the 4 corners
+        corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+        bg_samples = [pixels[x, y][:3] for x, y in corners]
+        # Use the most common corner color as background reference
+        from collections import Counter
+
+        bg_color = Counter(
+            tuple(min(255, max(0, c)) for c in s) for s in bg_samples
+        ).most_common(1)[0][0]
+
+        # Only run removal if background is light (likely white)
+        if not all(c >= threshold for c in bg_color):
+            return rgba
+
+        visited = [[False] * h for _ in range(w)]
+        queue: list[tuple[int, int]] = list(corners)
+        for cx, cy in corners:
+            visited[cx][cy] = True
+
+        while queue:
+            x, y = queue.pop()
+            r, g, b, a = pixels[x, y]
+            # Is this pixel close to the background color?
+            if (
+                abs(r - bg_color[0]) <= tolerance
+                and abs(g - bg_color[1]) <= tolerance
+                and abs(b - bg_color[2]) <= tolerance
+            ):
+                pixels[x, y] = (r, g, b, 0)  # make transparent
+                for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if 0 <= nx < w and 0 <= ny < h and not visited[nx][ny]:
+                        visited[nx][ny] = True
+                        queue.append((nx, ny))
+        return rgba
+
+    def generate_image(
+        self,
+        prompt: str,
+        *,
+        is_cg: bool = False,
+        aspect_ratio: str = "2:3",
+        template: str | None = None,
+    ) -> Path | None:
         """Generate an image and return its local path, or None on failure."""
         if template is None:
             template = CG_PROMPT_TEMPLATE if is_cg else VISUAL_PROMPT_TEMPLATE
@@ -112,6 +173,10 @@ class ImagenClient:
         try:
             img = self._request_image(full_prompt, aspect_ratio=aspect_ratio)
             if img:
+                # For character sprites (not CG/background): remove white background
+                if template is VISUAL_PROMPT_TEMPLATE:
+                    img = self._remove_white_bg(img)
+                    log.debug("White background removed from sprite")
                 img.save(cached, "PNG")
                 log.info("Generated image saved: %s", cached)
                 return cached
@@ -129,7 +194,9 @@ class ImagenClient:
             return self._download(m.group(1))
 
         # Bare URL on its own line
-        m = re.search(r"(https?://\S+\.(?:png|jpg|jpeg|webp)\S*)", content, re.IGNORECASE)
+        m = re.search(
+            r"(https?://\S+\.(?:png|jpg|jpeg|webp)\S*)", content, re.IGNORECASE
+        )
         if m:
             return self._download(m.group(1))
 
@@ -166,7 +233,12 @@ class ImagenClient:
             resp = httpx.get(url, timeout=30, follow_redirects=True)
             resp.raise_for_status()
             ct = resp.headers.get("content-type", "")
-            if "image" in ct or resp.content[:4] in (b"\x89PNG", b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xe1", b"RIFF"):
+            if "image" in ct or resp.content[:4] in (
+                b"\x89PNG",
+                b"\xff\xd8\xff\xe0",
+                b"\xff\xd8\xff\xe1",
+                b"RIFF",
+            ):
                 return Image.open(io.BytesIO(resp.content))
             log.debug("Downloaded URL was not an image (content-type: %s)", ct)
         except Exception:
@@ -186,7 +258,9 @@ class ImagenClient:
 
     def generate_background(self, description: str) -> Path | None:
         """Generate a 16:9 background illustration."""
-        return self.generate_image(description, aspect_ratio="16:9", template=BACKGROUND_PROMPT_TEMPLATE)
+        return self.generate_image(
+            description, aspect_ratio="16:9", template=BACKGROUND_PROMPT_TEMPLATE
+        )
 
     def generate_cg(self, cg_prompt: str) -> Path | None:
         return self.generate_image(cg_prompt, is_cg=True, aspect_ratio="16:9")

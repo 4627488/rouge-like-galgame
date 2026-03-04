@@ -10,11 +10,13 @@ import pygame
 
 from phantom_seed.ai.protocol import SceneData, VisualType
 from phantom_seed.core.coordinator import GameCoordinator
+from phantom_seed.core.save_system import BacklogEntry, SaveData, SaveSystem
 from phantom_seed.pipeline.async_gen import AsyncPipeline
 from phantom_seed.ui.dialogue import DialogueBox
 from phantom_seed.ui.fonts import get_font
 from phantom_seed.ui.hud import HUD
 from phantom_seed.ui.menu import ChoiceMenu
+from phantom_seed.ui.save_menu import SaveMenuOverlay
 from phantom_seed.ui.scene import SceneRenderer
 from phantom_seed.ui.transitions import FadeTransition, FlashTransition, Transition
 
@@ -56,8 +58,16 @@ class Engine:
         self.hud: HUD | None = None
         self.transition: Transition | None = None
 
+        # Save / overlay
+        self.save_system = SaveSystem(config.project_root)
+        self.save_overlay: SaveMenuOverlay | None = None
+
         # Dialogue state
         self._dialogue_index = 0
+        # Full backlog of every line seen this run
+        self._backlog: list[BacklogEntry] = []
+        # Phase before overlay was opened (to restore on close)
+        self._pre_overlay_phase = GamePhase.DIALOGUE
 
         # Seed input state
         self._seed_text = ""
@@ -83,6 +93,7 @@ class Engine:
         self.dialogue_box = DialogueBox(sw, sh)
         self.choice_menu = ChoiceMenu(sw, sh)
         self.hud = HUD(sw)
+        self.save_overlay = SaveMenuOverlay(sw, sh, self.save_system)
 
         self._title_font = get_font(48, bold=True)
         self._input_font = get_font(28)
@@ -112,6 +123,46 @@ class Engine:
                 self.running = False
                 return
 
+            # Overlay intercepts all events when active
+            assert self.save_overlay is not None
+            if self.save_overlay.active:
+                action = self.save_overlay.handle_event(event)
+                if action:
+                    self._handle_overlay_action(action)
+                return
+
+            # Global hotkeys (only when in-game)
+            in_game = self.phase in (
+                GamePhase.DIALOGUE,
+                GamePhase.CHOICE,
+                GamePhase.TRANSITION,
+            )
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_F5 and in_game:
+                    self._quicksave()
+                    return
+                if event.key == pygame.K_F9:
+                    self._quickload()
+                    return
+                if event.key == pygame.K_s and in_game:
+                    self._pre_overlay_phase = self.phase
+                    self.save_overlay.open_save()
+                    return
+                if event.key == pygame.K_l:
+                    self._pre_overlay_phase = self.phase
+                    self.save_overlay.open_load()
+                    return
+                if event.key == pygame.K_b and in_game:
+                    self._pre_overlay_phase = self.phase
+                    self.save_overlay.open_backlog(self._backlog)
+                    return
+
+            # Right-click context menu
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                self._pre_overlay_phase = self.phase
+                self.save_overlay.open_context(event.pos, in_game)
+                return
+
             if self.phase == GamePhase.TITLE:
                 self._handle_title_event(event)
             elif self.phase == GamePhase.SEED_INPUT:
@@ -134,7 +185,10 @@ class Engine:
             elif event.key == pygame.K_r and not self._seed_text:
                 import random
                 import string
-                self._seed_text = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+                self._seed_text = "".join(
+                    random.choices(string.ascii_lowercase + string.digits, k=8)
+                )
             elif event.key == pygame.K_BACKSPACE:
                 self._seed_text = self._seed_text[:-1]
             elif event.unicode and len(self._seed_text) < 30:
@@ -172,6 +226,7 @@ class Engine:
             # Restart
             assert self.coordinator is not None
             self.coordinator.state.reset_for_new_run()
+            self._backlog.clear()
             self.phase = GamePhase.SEED_INPUT
             self._seed_text = ""
 
@@ -205,6 +260,7 @@ class Engine:
             else:
                 # Fallback on error
                 from phantom_seed.ai.protocol import FALLBACK_SCENE
+
                 self._apply_scene(FALLBACK_SCENE)
 
     def _update_transition(self, dt_ms: int) -> None:
@@ -213,6 +269,95 @@ class Engine:
             if self.transition.done:
                 self.transition = None
                 self.phase = GamePhase.DIALOGUE
+
+    # ── Save / Load helpers ─────────────────────────────────────
+
+    def _quicksave(self) -> None:
+        if not self.coordinator:
+            return
+        assert self.save_overlay is not None
+        self.save_system.save(
+            "QUICK",
+            self.coordinator,
+            self._dialogue_index,
+            self._backlog,
+            screenshot=self.screen,
+        )
+        log.info("Quick saved")
+
+    def _quickload(self) -> None:
+        data = self.save_system.load("QUICK")
+        if data:
+            self._restore_from_save(data)
+            log.info("Quick loaded")
+
+    def _handle_overlay_action(self, action: str) -> None:
+        if action == "close":
+            return
+        if action == "qsave":
+            self._quicksave()
+        elif action == "qload":
+            self._quickload()
+        elif action == "save":
+            assert self.save_overlay is not None
+            self._pre_overlay_phase = self.phase
+            self.save_overlay.open_save()
+        elif action == "load":
+            assert self.save_overlay is not None
+            self._pre_overlay_phase = self.phase
+            self.save_overlay.open_load()
+        elif action == "backlog":
+            assert self.save_overlay is not None
+            self._pre_overlay_phase = self.phase
+            self.save_overlay.open_backlog(self._backlog)
+        elif action.startswith("save:"):
+            slot = action.split(":", 1)[1]
+            if self.coordinator:
+                self.save_system.save(
+                    slot,
+                    self.coordinator,
+                    self._dialogue_index,
+                    self._backlog,
+                    screenshot=self.screen,
+                )
+        elif action.startswith("load:"):
+            slot = action.split(":", 1)[1]
+            data = self.save_system.load(slot)
+            if data:
+                self._restore_from_save(data)
+
+    def _restore_from_save(self, data: SaveData) -> None:
+        # Rebuild coordinator
+        self.coordinator = GameCoordinator(self.config)
+        self.pipeline = AsyncPipeline(self.coordinator)
+        self.save_system.restore_coordinator(data, self.coordinator)
+
+        # Restore renderer
+        assert self.scene_renderer is not None
+        self.scene_renderer.characters.clear()
+        self.scene_renderer.background = None
+        self.scene_renderer.bg_path = ""
+
+        if self.coordinator.character and self.coordinator.character_sprite_path:
+            self.scene_renderer.set_character_sprite_path(
+                self.coordinator.character.name,
+                self.coordinator.character_sprite_path,
+            )
+
+        # Restore backlog
+        self._backlog = [BacklogEntry(**e) for e in data.backlog]
+
+        # Restore scene and dialogue index
+        self._dialogue_index = data.dialogue_index
+        if self.coordinator.current_scene:
+            scene = self.coordinator.current_scene
+            self.current_scene = scene
+            self.scene_renderer.apply_scene(scene)
+            self.phase = GamePhase.DIALOGUE
+            self._set_current_dialogue()
+        else:
+            self.phase = GamePhase.SEED_INPUT
+            self._seed_text = ""
 
     # ── Scene management ────────────────────────────────────────
 
@@ -268,7 +413,36 @@ class Engine:
         assert self.dialogue_box is not None
         if self._dialogue_index < len(self.current_scene.script):
             line = self.current_scene.script[self._dialogue_index]
-            self.dialogue_box.set_dialogue(line.speaker, line.text, line.inner_monologue)
+            # Handle mid-scene background transition
+            if line.scene_transition and self.scene_renderer and self.coordinator:
+                cached = self.coordinator.get_cached_bg(line.scene_transition)
+                if cached:
+                    from pathlib import Path
+                    from phantom_seed.ui.assets import load_image
+
+                    bg = load_image(
+                        cached, (self.config.screen_width, self.config.screen_height)
+                    )
+                    if bg:
+                        self.scene_renderer.background = bg
+                        self.scene_renderer.bg_path = cached
+            self.dialogue_box.set_dialogue(
+                line.speaker, line.text, line.inner_monologue
+            )
+            # Append to backlog
+            scene_id = self.current_scene.scene_id if self.current_scene else ""
+            entry = BacklogEntry(
+                speaker=line.speaker,
+                text=line.text,
+                inner_monologue=line.inner_monologue,
+                scene_id=scene_id,
+            )
+            # Avoid duplicates when restoring from save
+            if not self._backlog or (
+                self._backlog[-1].text != line.text
+                or self._backlog[-1].speaker != line.speaker
+            ):
+                self._backlog.append(entry)
 
     def _advance_dialogue(self) -> None:
         """Move to the next dialogue line, or show choices."""
@@ -305,6 +479,11 @@ class Engine:
             self._render_game()
         elif self.phase == GamePhase.GAME_OVER:
             self._render_game_over()
+
+        # Overlay always renders on top
+        assert self.save_overlay is not None
+        if self.save_overlay.active:
+            self.save_overlay.render(self.screen)
 
         pygame.display.flip()
 
@@ -348,10 +527,14 @@ class Engine:
 
         # Seed text with cursor
         cursor = "|" if (pygame.time.get_ticks() // 500) % 2 == 0 else ""
-        text_surf = self._input_font.render(self._seed_text + cursor, True, (230, 220, 245))
+        text_surf = self._input_font.render(
+            self._seed_text + cursor, True, (230, 220, 245)
+        )
         self.screen.blit(text_surf, (box_x + 12, box_y + 10))
 
-        hint = self._loading_font.render("按 Enter 确认 | 按 R 生成随机种子", True, (100, 90, 120))
+        hint = self._loading_font.render(
+            "按 Enter 确认 | 按 R 生成随机种子", True, (100, 90, 120)
+        )
         hx = (self.config.screen_width - hint.get_width()) // 2
         self.screen.blit(hint, (hx, 400))
 
@@ -380,7 +563,9 @@ class Engine:
         # HUD
         if self.coordinator:
             assert self.hud is not None
-            self.hud.render(self.screen, self.coordinator.state.sanity, self.coordinator.state.favor)
+            self.hud.render(
+                self.screen, self.coordinator.state.sanity, self.coordinator.state.favor
+            )
 
         # Dialogue
         if self.phase in (GamePhase.DIALOGUE, GamePhase.TRANSITION):

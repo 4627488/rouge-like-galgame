@@ -61,7 +61,9 @@ class GeminiClient:
             seed_hash=seed_hash,
             trait_code=trait_code,
         )
-        raw = self._generate(prompt, system="你是一个角色设计师。请严格按照 JSON 格式输出角色档案。")
+        raw = self._generate(
+            prompt, system="你是一个角色设计师。请严格按照 JSON 格式输出角色档案。"
+        )
         data = self._extract_json(raw)
         return CharacterProfile.model_validate(data)
 

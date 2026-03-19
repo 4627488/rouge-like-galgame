@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Chapter beats — drive narrative pacing
+# Chapter beats — romance narrative arc
 CHAPTER_BEATS = [
-    "序章·相遇（铺垫人物关系，建立悬念）",
-    "第一幕·异变（日常中出现第一个裂缝，引入核心矛盾）",
-    "第二幕·试探（角色相互试探，隐藏信息逐渐露出冰山一角）",
-    "第三幕·冲突（正面矛盾爆发，揭示一个重大秘密）",
-    "第四幕·深渊（主角心理开始动摇，理智值危机或感情危机）",
-    "第五幕·真相碎片（核心秘密几乎被揭穿，角色做出关键选择）",
-    "终章·收束（路线分叉，走向不同结局）",
+    "序章·邂逅（命运般的相遇，建立第一印象）",
+    "第一幕·接近（日常互动增多，逐渐熟悉彼此）",
+    "第二幕·心动（不经意间的心跳加速，暧昧的气氛）",
+    "第三幕·波澜（误会或小冲突，考验两人的关系）",
+    "第四幕·坦诚（敞开心扉，分享内心深处的想法）",
+    "第五幕·告白（鼓起勇气表达心意，命运的抉择）",
+    "终章·结局（故事走向各自的结局）",
 ]
 
 
@@ -20,12 +20,10 @@ CHAPTER_BEATS = [
 class GameState:
     """Tracks all mutable game state for the current run."""
 
-    sanity: int = 100
-    favor: int = 0
+    affection: int = 0
     round_number: int = 0
     history: list[str] = field(default_factory=list)
     memory_fragments: list[str] = field(default_factory=list)  # meta-progression
-    is_game_over: bool = False
     is_ending: bool = False
 
     @property
@@ -35,10 +33,7 @@ class GameState:
 
     def apply_delta(self, delta: dict[str, int]) -> None:
         """Apply stat changes from a choice."""
-        self.sanity = max(0, min(100, self.sanity + delta.get("sanity", 0)))
-        self.favor = max(0, min(100, self.favor + delta.get("favor", 0)))
-        if self.sanity <= 0:
-            self.is_game_over = True
+        self.affection = max(0, min(100, self.affection + delta.get("affection", 0)))
 
     def advance_round(self) -> None:
         self.round_number += 1
@@ -55,12 +50,10 @@ class GameState:
         return "\n".join(f"- {h}" for h in self.history)
 
     def reset_for_new_run(self) -> None:
-        """Reset for a new roguelike run, keeping meta-progression."""
+        """Reset for a new run, keeping meta-progression."""
         fragments = self.memory_fragments.copy()
-        self.sanity = 100
-        self.favor = 0
+        self.affection = 0
         self.round_number = 0
         self.history.clear()
-        self.is_game_over = False
         self.is_ending = False
         self.memory_fragments = fragments

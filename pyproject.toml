@@ -6,11 +6,12 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "pygame-ce>=2.5",
-    "openai>=1.0",
-    "httpx>=0.28",
+    "google-genai>=1.0",
     "pydantic>=2.10",
     "pillow>=11.0",
     "rembg>=2.0.72",
+    "langchain-core>=0.3",
+    "langchain-google-genai>=2.1",
 ]
 
 [project.optional-dependencies]

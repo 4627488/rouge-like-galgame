@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
-from phantom_seed.ai.gemini_client import GeminiClient
+from phantom_seed.ai.chains import CharacterChain, SceneChain
 from phantom_seed.ai.imagen_client import ImagenClient
 from phantom_seed.ai.protocol import (
     FALLBACK_SCENE,
@@ -28,17 +28,19 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+ProgressCallback = Callable[[int, int, str], None]
+
 
 class GameCoordinator:
     """Central coordinator that drives the game loop."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.gemini = GeminiClient(config)
+        self.character_chain = CharacterChain(config)
+        self.scene_chain = SceneChain(config)
         self.imagen = ImagenClient(config)
         self.state = GameState(
-            sanity=config.initial_sanity,
-            favor=config.initial_affection,
+            affection=config.initial_affection,
         )
         self.character: CharacterProfile | None = None
         self.seed_hash: str = ""
@@ -98,26 +100,48 @@ class GameCoordinator:
         with self._bg_lock:
             return self._bg_cache.get(key)
 
-    def init_game(self, seed_string: str) -> SceneData:
+    @staticmethod
+    def _emit_progress(
+        progress_cb: ProgressCallback | None,
+        step: int,
+        total: int,
+        message: str,
+    ) -> None:
+        if not progress_cb:
+            return
+        try:
+            progress_cb(step, total, message)
+        except Exception:
+            log.debug("Progress callback failed", exc_info=True)
+
+    def init_game(
+        self,
+        seed_string: str,
+        *,
+        progress_cb: ProgressCallback | None = None,
+    ) -> SceneData:
         """Initialize a new game run from a seed string."""
+        self._emit_progress(progress_cb, 1, 5, "解析种子")
         self.seed_hash = hash_seed(seed_string)
         trait_code = derive_trait_code(self.seed_hash)
         self.atmosphere = derive_initial_atmosphere(self.seed_hash)
 
         # Generate character
+        self._emit_progress(progress_cb, 2, 5, "生成人设")
         try:
-            self.character = self.gemini.generate_character(self.seed_hash, trait_code)
+            self.character = self.character_chain.invoke(self.seed_hash, trait_code)
             log.info("Character generated: %s", self.character.name)
         except Exception:
             log.exception("Failed to generate character")
             self.character = CharacterProfile(
                 name="???",
-                personality="神秘而不可捉摸",
-                speech_pattern="说话断断续续，偶尔会沉默",
-                visual_description="a mysterious figure with silver hair and red eyes, dark school uniform",
+                personality="温柔而神秘，让人忍不住想要了解更多",
+                speech_pattern="说话轻声细语，偶尔会害羞地低下头",
+                visual_description="an attractive adult university student woman with long pink hair and blue eyes, casual stylish outfit, gentle smile",
             )
 
         # Generate sprite
+        self._emit_progress(progress_cb, 3, 5, "生成角色立绘")
         try:
             self.character_sprite_path = self.imagen.generate_character_sprite(
                 self.character.visual_description
@@ -126,31 +150,32 @@ class GameCoordinator:
             log.exception("Failed to generate character sprite")
 
         # Generate first scene
-        return self.get_next_scene()
+        self._emit_progress(progress_cb, 4, 5, "生成首个场景")
+        scene = self.get_next_scene(progress_cb=progress_cb)
+        self._emit_progress(progress_cb, 5, 5, "初始化完成")
+        return scene
 
     def get_next_scene(
-        self, player_choice: str = "", choice_delta: dict[str, int] | None = None
+        self,
+        player_choice: str = "",
+        choice_delta: dict[str, int] | None = None,
+        *,
+        progress_cb: ProgressCallback | None = None,
     ) -> SceneData:
         """Generate the next scene, applying any choice effects."""
+        self._emit_progress(progress_cb, 1, 6, "应用状态")
         if choice_delta:
             self.state.apply_delta(choice_delta)
 
-        if self.state.is_game_over:
-            fragment = generate_memory_fragment(
-                self.state.history, self.state.round_number
-            )
-            self.state.memory_fragments.append(fragment)
-            return self._game_over_scene()
-
         self.state.advance_round()
-        random_event = roll_random_event(self.state.round_number, self.state.sanity)
+        random_event = roll_random_event(self.state.round_number, self.state.affection)
 
+        self._emit_progress(progress_cb, 2, 6, "生成剧情")
         try:
             assert self.character is not None
-            scene = self.gemini.generate_scene(
+            scene = self.scene_chain.invoke(
                 character_profile=self.character,
-                sanity=self.state.sanity,
-                favor=self.state.favor,
+                affection=self.state.affection,
                 round_number=self.state.round_number,
                 history_summary=self.state.get_history_summary(),
                 last_choice=player_choice,
@@ -165,6 +190,7 @@ class GameCoordinator:
             self.state.is_ending = True
 
         # Record history (multiple lines for longer scenes)
+        self._emit_progress(progress_cb, 3, 6, "整理状态")
         if scene.script:
             speakers = set(
                 l.speaker for l in scene.script if l.speaker not in ("旁白", "系统")
@@ -173,6 +199,7 @@ class GameCoordinator:
             self.state.add_history(summary)
 
         # Generate main background (or CG)
+        self._emit_progress(progress_cb, 4, 6, "生成主视觉")
         if scene.visual_type == VisualType.CINEMATIC_CG and scene.climax_cg_prompt:
             path = self._get_or_generate_bg(scene.climax_cg_prompt, is_cg=True)
             if path:
@@ -183,141 +210,26 @@ class GameCoordinator:
                 scene.background = path
 
         # Pre-generate transition backgrounds in background threads (non-blocking)
+        self._emit_progress(progress_cb, 5, 6, "预取转场背景")
         self._generate_transition_bgs_async(scene)
 
         self.current_scene = scene
+        self._emit_progress(progress_cb, 6, 6, "场景完成")
         return scene
 
-    def _game_over_scene(self) -> SceneData:
+    def _ending_scene(self) -> SceneData:
         return SceneData(
-            scene_id="game_over",
-            background="deep void, endless darkness, faint glowing particles",
+            scene_id="ending",
+            background="beautiful sunset over school rooftop, warm golden light, cherry blossoms",
             script=[
                 {
-                    "speaker": "系统",
-                    "text": "你的意识沉入了黑暗之中......",
-                    "inner_monologue": "一切都结束了。但是，似乎有什么残留了下来。",
+                    "speaker": "旁白",
+                    "text": "这段故事，终于画上了句号。",
+                    "inner_monologue": "夕阳的余晖洒落，心中满是温暖的回忆。",
                 }
             ],
             choices=[
-                {"text": "重新开始", "target_state_delta": {}},
-            ],
-            game_state_update={"is_climax": False, "is_ending": True},
-        )
-
-        """Initialize a new game run from a seed string.
-
-        1. Hash the seed
-        2. Generate character profile via Gemini
-        3. Generate character base sprite via Imagen
-        4. Generate the first scene
-        """
-        self.seed_hash = hash_seed(seed_string)
-        trait_code = derive_trait_code(self.seed_hash)
-        self.atmosphere = derive_initial_atmosphere(self.seed_hash)
-
-        # Generate character
-        try:
-            self.character = self.gemini.generate_character(self.seed_hash, trait_code)
-            log.info("Character generated: %s", self.character.name)
-        except Exception:
-            log.exception("Failed to generate character")
-            self.character = CharacterProfile(
-                name="???",
-                personality="神秘而不可捉摸",
-                speech_pattern="说话断断续续，偶尔会沉默",
-                visual_description="a mysterious figure with silver hair and red eyes, dark school uniform",
-            )
-
-        # Generate sprite
-        try:
-            self.character_sprite_path = self.imagen.generate_character_sprite(
-                self.character.visual_description
-            )
-        except Exception:
-            log.exception("Failed to generate character sprite")
-
-        # Generate first scene
-        return self.get_next_scene()
-
-    def get_next_scene(
-        self, player_choice: str = "", choice_delta: dict[str, int] | None = None
-    ) -> SceneData:
-        """Generate the next scene, applying any choice effects."""
-        if choice_delta:
-            self.state.apply_delta(choice_delta)
-
-        if self.state.is_game_over:
-            fragment = generate_memory_fragment(
-                self.state.history, self.state.round_number
-            )
-            self.state.memory_fragments.append(fragment)
-            return self._game_over_scene()
-
-        self.state.advance_round()
-
-        # Roll for random event
-        random_event = roll_random_event(self.state.round_number, self.state.sanity)
-
-        try:
-            assert self.character is not None
-            scene = self.gemini.generate_scene(
-                character_profile=self.character,
-                sanity=self.state.sanity,
-                favor=self.state.favor,
-                round_number=self.state.round_number,
-                history_summary=self.state.get_history_summary(),
-                last_choice=player_choice,
-                random_event=random_event,
-            )
-        except Exception:
-            log.exception("Scene generation failed, using fallback")
-            scene = FALLBACK_SCENE
-
-        # Check for ending
-        if scene.game_state_update.is_ending:
-            self.state.is_ending = True
-
-        # Record history
-        if scene.script:
-            first_line = scene.script[0]
-            self.state.add_history(f"[{first_line.speaker}] {first_line.text[:40]}")
-
-        # Generate CG or background image
-        if scene.visual_type == VisualType.CINEMATIC_CG and scene.climax_cg_prompt:
-            try:
-                cg_path = self.imagen.generate_cg(scene.climax_cg_prompt)
-                if cg_path:
-                    scene.background = str(cg_path)
-            except Exception:
-                log.exception("CG generation failed")
-        else:
-            # Generate background from the scene's background description
-            if scene.background:
-                try:
-                    bg_path = self.imagen.generate_background(scene.background)
-                    if bg_path:
-                        scene.background = str(bg_path)
-                        log.info("Background generated: %s", bg_path)
-                except Exception:
-                    log.exception("Background generation failed")
-
-        self.current_scene = scene
-        return scene
-
-    def _game_over_scene(self) -> SceneData:
-        return SceneData(
-            scene_id="game_over",
-            background="void",
-            script=[
-                {
-                    "speaker": "系统",
-                    "text": "你的意识沉入了黑暗之中......",
-                    "inner_monologue": "一切都结束了。但是，似乎有什么残留了下来。",
-                }
-            ],
-            choices=[
-                {"text": "重新开始", "target_state_delta": {}},
+                {"text": "回到主菜单", "target_state_delta": {}},
             ],
             game_state_update={"is_climax": False, "is_ending": True},
         )

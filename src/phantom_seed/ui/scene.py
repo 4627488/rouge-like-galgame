@@ -191,7 +191,7 @@ class SceneRenderer:
         if self.background:
             screen.blit(self.background, (0, 0))
         else:
-            screen.fill((12, 8, 22))
+            screen.fill((50, 40, 55))
 
         # Sprites hidden for CG scenes (CG image covers the full canvas)
         if not self.hide_sprites:

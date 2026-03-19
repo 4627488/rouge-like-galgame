@@ -1,42 +1,42 @@
-"""Roguelike mechanics — random events, permadeath, meta-progression."""
+"""Romance event mechanics — random encounters and memory fragments."""
 
 from __future__ import annotations
 
 import random
 
 
-# Random disturbance events injected into scene generation
+# Random romance encounters injected into scene generation
 RANDOM_EVENTS = [
-    "角色突然露出了与平时完全不同的表情，眼神变得阴暗。",
-    "背景中传来了不属于这个场景的诡异音乐声。",
-    "角色说出了一句不在剧本里的话，似乎在打破第四面墙。",
-    "周围的环境开始扭曲，像是画面出了故障。",
-    "角色短暂地消失了一瞬间，然后出现在了不同的位置。",
-    "突然有另一个声音插入了对话，但看不到说话的人。",
-    "角色的影子似乎在独立行动。",
-    "时间似乎倒流了一小段，同样的对话重复了一遍但内容微妙不同。",
-    "角色突然问了你一个私人问题，仿佛知道你是玩家。",
-    "背景中出现了一个不应该存在的门。",
+    "突然下起了小雨，只有一把伞。",
+    "在自动贩卖机前偶遇，两人同时按了同一个按钮。",
+    "对方带了两份便当，害羞地递过来一份。",
+    "放学后一起值日，阳光从窗户洒进来。",
+    "在图书馆不小心碰到了对方的手。",
+    "体育课后在走廊偶遇，对方递来一瓶冰水。",
+    "放学路上看到了很美的夕阳。",
+    "学园祭的准备工作中，两人被分到了同一组。",
+    "在天台上发现了对方一个人在看风景。",
+    "下课铃响后，对方在教室门口等着你。",
 ]
 
 
-def roll_random_event(round_number: int, sanity: int) -> str:
-    """Roll for a random disturbance event.
+def roll_random_event(round_number: int, affection: int) -> str:
+    """Roll for a random romance encounter.
 
-    Higher rounds and lower sanity increase event probability.
+    Higher rounds and higher affection increase event probability.
     """
-    base_chance = 0.15
-    sanity_bonus = (100 - sanity) / 200  # up to +0.5 at sanity=0
-    round_bonus = min(round_number * 0.02, 0.2)  # up to +0.2
+    base_chance = 0.2
+    affection_bonus = affection / 400  # up to +0.25 at affection=100
+    round_bonus = min(round_number * 0.02, 0.15)  # up to +0.15
 
-    if random.random() < base_chance + sanity_bonus + round_bonus:
+    if random.random() < base_chance + affection_bonus + round_bonus:
         return random.choice(RANDOM_EVENTS)
     return ""
 
 
 def generate_memory_fragment(history: list[str], round_number: int) -> str:
-    """Generate a memory fragment for meta-progression on game over."""
+    """Generate a memory fragment for meta-progression."""
     if not history:
-        return f"第{round_number}轮：一段模糊的记忆，什么都想不起来了。"
+        return f"第{round_number}幕：一段朦胧的回忆，温暖而模糊。"
     last = history[-1] if history else ""
-    return f"第{round_number}轮的残影：{last[:50]}..."
+    return f"第{round_number}幕的记忆：{last[:50]}..."

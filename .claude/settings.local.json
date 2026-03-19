@@ -5,7 +5,8 @@
       "Bash(py:*)",
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(find E:/rouge-like-galgame/src -type d -name \"__pycache__\" -exec rm -rf {} + 2>/dev/null; echo \"pycache cleaned\")"
     ]
   }
 }

@@ -86,8 +86,8 @@ class ChoiceMenu:
             is_hover = i == self.hovered
 
             # Button background
-            bg_color = (60, 30, 80, 220) if is_hover else (30, 15, 50, 200)
-            border_color = (180, 140, 220) if is_hover else (100, 80, 130)
+            bg_color = (120, 70, 100, 220) if is_hover else (70, 45, 65, 200)
+            border_color = (220, 170, 200) if is_hover else (140, 100, 130)
 
             btn_surf = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
             btn_surf.fill(bg_color)
@@ -95,7 +95,7 @@ class ChoiceMenu:
             pygame.draw.rect(screen, border_color, rect, 2)
 
             # Text
-            text_color = (255, 230, 255) if is_hover else (200, 200, 220)
+            text_color = (255, 240, 245) if is_hover else (220, 210, 220)
             text_surf = self.font.render(choice.text, True, text_color)
             text_x = rect.x + (rect.w - text_surf.get_width()) // 2
             text_y = rect.y + (rect.h - text_surf.get_height()) // 2
@@ -106,7 +106,8 @@ class ChoiceMenu:
                 hints = []
                 for stat, val in choice.target_state_delta.items():
                     sign = "+" if val > 0 else ""
-                    hints.append(f"{stat} {sign}{val}")
+                    label_name = "好感度" if stat == "affection" else stat
+                    hints.append(f"{label_name} {sign}{val}")
                 hint_text = " | ".join(hints)
-                hint_surf = self.font.render(hint_text, True, (140, 140, 160))
+                hint_surf = self.font.render(hint_text, True, (180, 140, 160))
                 screen.blit(hint_surf, (rect.right - hint_surf.get_width() - 12, rect.y + 4))

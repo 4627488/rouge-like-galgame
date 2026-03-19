@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import random
+import string
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
@@ -15,9 +17,11 @@ from phantom_seed.pipeline.async_gen import AsyncPipeline
 from phantom_seed.ui.dialogue import DialogueBox
 from phantom_seed.ui.fonts import get_font
 from phantom_seed.ui.hud import HUD
+from phantom_seed.ui.main_menu import MainMenu
 from phantom_seed.ui.menu import ChoiceMenu
 from phantom_seed.ui.save_menu import SaveMenuOverlay
 from phantom_seed.ui.scene import SceneRenderer
+from phantom_seed.ui.settings_menu import SettingsOverlay
 from phantom_seed.ui.transitions import FadeTransition, FlashTransition, Transition
 
 if TYPE_CHECKING:
@@ -27,13 +31,12 @@ log = logging.getLogger(__name__)
 
 
 class GamePhase(Enum):
-    TITLE = auto()
-    SEED_INPUT = auto()
+    MAIN_MENU = auto()
     LOADING = auto()
     DIALOGUE = auto()
     CHOICE = auto()
     TRANSITION = auto()
-    GAME_OVER = auto()
+    ENDING = auto()
 
 
 class Engine:
@@ -42,7 +45,7 @@ class Engine:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.running = False
-        self.phase = GamePhase.TITLE
+        self.phase = GamePhase.MAIN_MENU
         self.clock: pygame.time.Clock | None = None
         self.screen: pygame.Surface | None = None
 
@@ -57,6 +60,8 @@ class Engine:
         self.choice_menu: ChoiceMenu | None = None
         self.hud: HUD | None = None
         self.transition: Transition | None = None
+        self.main_menu: MainMenu | None = None
+        self.settings_overlay: SettingsOverlay | None = None
 
         # Save / overlay
         self.save_system = SaveSystem(config.project_root)
@@ -69,9 +74,7 @@ class Engine:
         # Phase before overlay was opened (to restore on close)
         self._pre_overlay_phase = GamePhase.DIALOGUE
 
-        # Seed input state
-        self._seed_text = ""
-        self._input_font: pygame.font.Font | None = None
+        # Fonts
         self._title_font: pygame.font.Font | None = None
         self._loading_font: pygame.font.Font | None = None
 
@@ -82,8 +85,10 @@ class Engine:
     def init(self) -> None:
         """Initialize Pygame and all UI components."""
         pygame.init()
+        flags = pygame.FULLSCREEN if self.config.fullscreen else 0
         self.screen = pygame.display.set_mode(
             (self.config.screen_width, self.config.screen_height),
+            flags,
         )
         pygame.display.set_caption(self.config.title)
         self.clock = pygame.time.Clock()
@@ -91,19 +96,21 @@ class Engine:
         sw, sh = self.config.screen_width, self.config.screen_height
         self.scene_renderer = SceneRenderer(sw, sh)
         self.dialogue_box = DialogueBox(sw, sh)
+        self.dialogue_box.set_text_speed(self.config.text_speed_ms)
         self.choice_menu = ChoiceMenu(sw, sh)
         self.hud = HUD(sw)
         self.save_overlay = SaveMenuOverlay(sw, sh, self.save_system)
+        self.main_menu = MainMenu(sw, sh, self.save_system)
+        self.settings_overlay = SettingsOverlay(sw, sh, self.config)
 
         self._title_font = get_font(48, bold=True)
-        self._input_font = get_font(28)
         self._loading_font = get_font(24)
 
     def run(self) -> None:
         """Main game loop."""
         self.init()
         self.running = True
-        self.phase = GamePhase.TITLE
+        self.phase = GamePhase.MAIN_MENU
 
         while self.running:
             assert self.clock is not None
@@ -123,7 +130,17 @@ class Engine:
                 self.running = False
                 return
 
-            # Overlay intercepts all events when active
+            # Settings overlay intercepts all events when active
+            assert self.settings_overlay is not None
+            if self.settings_overlay.active:
+                action = self.settings_overlay.handle_event(event)
+                if action == "close":
+                    # Sync text speed to dialogue box
+                    assert self.dialogue_box is not None
+                    self.dialogue_box.set_text_speed(self.config.text_speed_ms)
+                return
+
+            # Save overlay intercepts all events when active
             assert self.save_overlay is not None
             if self.save_overlay.active:
                 action = self.save_overlay.handle_event(event)
@@ -163,36 +180,32 @@ class Engine:
                 self.save_overlay.open_context(event.pos, in_game)
                 return
 
-            if self.phase == GamePhase.TITLE:
-                self._handle_title_event(event)
-            elif self.phase == GamePhase.SEED_INPUT:
-                self._handle_seed_input_event(event)
+            if self.phase == GamePhase.MAIN_MENU:
+                self._handle_main_menu_event(event)
             elif self.phase == GamePhase.DIALOGUE:
                 self._handle_dialogue_event(event)
             elif self.phase == GamePhase.CHOICE:
                 self._handle_choice_event(event)
-            elif self.phase == GamePhase.GAME_OVER:
-                self._handle_game_over_event(event)
+            elif self.phase == GamePhase.ENDING:
+                self._handle_ending_event(event)
 
-    def _handle_title_event(self, event: pygame.event.Event) -> None:
-        if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-            self.phase = GamePhase.SEED_INPUT
-
-    def _handle_seed_input_event(self, event: pygame.event.Event) -> None:
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_RETURN and self._seed_text.strip():
-                self._start_game(self._seed_text.strip())
-            elif event.key == pygame.K_r and not self._seed_text:
-                import random
-                import string
-
-                self._seed_text = "".join(
-                    random.choices(string.ascii_lowercase + string.digits, k=8)
-                )
-            elif event.key == pygame.K_BACKSPACE:
-                self._seed_text = self._seed_text[:-1]
-            elif event.unicode and len(self._seed_text) < 30:
-                self._seed_text += event.unicode
+    def _handle_main_menu_event(self, event: pygame.event.Event) -> None:
+        assert self.main_menu is not None
+        action = self.main_menu.handle_event(event)
+        if action == "new_game":
+            seed = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            self._start_game(seed)
+        elif action == "continue":
+            self._quickload()
+        elif action == "load":
+            self._pre_overlay_phase = self.phase
+            assert self.save_overlay is not None
+            self.save_overlay.open_load()
+        elif action == "settings":
+            assert self.settings_overlay is not None
+            self.settings_overlay.open()
+        elif action == "exit":
+            self.running = False
 
     def _handle_dialogue_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -221,14 +234,13 @@ class Engine:
                 self.pipeline.request_next(chosen.text, chosen.target_state_delta)
                 self.phase = GamePhase.LOADING
 
-    def _handle_game_over_event(self, event: pygame.event.Event) -> None:
+    def _handle_ending_event(self, event: pygame.event.Event) -> None:
         if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-            # Restart
-            assert self.coordinator is not None
-            self.coordinator.state.reset_for_new_run()
+            # Return to main menu
+            if self.coordinator:
+                self.coordinator.state.reset_for_new_run()
             self._backlog.clear()
-            self.phase = GamePhase.SEED_INPUT
-            self._seed_text = ""
+            self.phase = GamePhase.MAIN_MENU
 
     # ── Update ──────────────────────────────────────────────────
 
@@ -356,8 +368,7 @@ class Engine:
             self.phase = GamePhase.DIALOGUE
             self._set_current_dialogue()
         else:
-            self.phase = GamePhase.SEED_INPUT
-            self._seed_text = ""
+            self.phase = GamePhase.MAIN_MENU
 
     # ── Scene management ────────────────────────────────────────
 
@@ -366,29 +377,9 @@ class Engine:
         self.coordinator = GameCoordinator(self.config)
         self.pipeline = AsyncPipeline(self.coordinator)
 
-        # Register character sprite path after init
         self.phase = GamePhase.LOADING
         self._loading_dots = 0
-
-        # Run init_game in background thread
-        import threading
-
-        def _init_worker() -> None:
-            assert self.coordinator is not None
-            assert self.pipeline is not None
-            scene = self.coordinator.init_game(seed)
-            # Register sprite with renderer
-            if self.coordinator.character and self.scene_renderer:
-                self.scene_renderer.set_character_sprite_path(
-                    self.coordinator.character.name,
-                    self.coordinator.character_sprite_path,
-                )
-            self.pipeline._prefetched = scene
-            self.pipeline._generating = False
-
-        self.pipeline._generating = True
-        t = threading.Thread(target=_init_worker, daemon=True)
-        t.start()
+        self.pipeline.request_init(seed)
 
     def _apply_scene(self, scene: SceneData) -> None:
         """Apply a new scene to the UI."""
@@ -396,6 +387,11 @@ class Engine:
         self._dialogue_index = 0
 
         assert self.scene_renderer is not None
+        if self.coordinator and self.coordinator.character:
+            self.scene_renderer.set_character_sprite_path(
+                self.coordinator.character.name,
+                self.coordinator.character_sprite_path,
+            )
         self.scene_renderer.apply_scene(scene)
 
         # Start transition
@@ -453,7 +449,7 @@ class Engine:
         else:
             # Dialogue done — show choices or check game state
             if self.current_scene.game_state_update.is_ending:
-                self.phase = GamePhase.GAME_OVER
+                self.phase = GamePhase.ENDING
             elif self.current_scene.choices:
                 assert self.choice_menu is not None
                 self.choice_menu.show(self.current_scene.choices)
@@ -469,83 +465,40 @@ class Engine:
     def _render(self) -> None:
         assert self.screen is not None
 
-        if self.phase == GamePhase.TITLE:
-            self._render_title()
-        elif self.phase == GamePhase.SEED_INPUT:
-            self._render_seed_input()
+        if self.phase == GamePhase.MAIN_MENU:
+            self._render_main_menu()
         elif self.phase == GamePhase.LOADING:
             self._render_loading()
         elif self.phase in (GamePhase.DIALOGUE, GamePhase.CHOICE, GamePhase.TRANSITION):
             self._render_game()
-        elif self.phase == GamePhase.GAME_OVER:
-            self._render_game_over()
+        elif self.phase == GamePhase.ENDING:
+            self._render_ending()
 
-        # Overlay always renders on top
+        # Settings overlay always renders on top
+        assert self.settings_overlay is not None
+        if self.settings_overlay.active:
+            self.settings_overlay.render(self.screen)
+
+        # Save overlay always renders on top
         assert self.save_overlay is not None
         if self.save_overlay.active:
             self.save_overlay.render(self.screen)
 
         pygame.display.flip()
 
-    def _render_title(self) -> None:
+    def _render_main_menu(self) -> None:
         assert self.screen is not None
-        assert self._title_font is not None
-        assert self._input_font is not None
-
-        self.screen.fill((10, 5, 20))
-
-        # Title
-        title = self._title_font.render("Phantom Seed", True, (200, 150, 255))
-        tx = (self.config.screen_width - title.get_width()) // 2
-        self.screen.blit(title, (tx, 240))
-
-        # Subtitle
-        sub = self._input_font.render("Press any key to start", True, (140, 120, 160))
-        sx = (self.config.screen_width - sub.get_width()) // 2
-        tick = pygame.time.get_ticks()
-        alpha = 128 + int(127 * ((tick % 2000) / 2000))
-        sub.set_alpha(alpha)
-        self.screen.blit(sub, (sx, 340))
-
-    def _render_seed_input(self) -> None:
-        assert self.screen is not None
-        assert self._title_font is not None
-        assert self._input_font is not None
-
-        self.screen.fill((10, 5, 20))
-
-        prompt = self._input_font.render("输入种子 (Seed):", True, (180, 160, 200))
-        px = (self.config.screen_width - prompt.get_width()) // 2
-        self.screen.blit(prompt, (px, 260))
-
-        # Input box
-        box_w, box_h = 400, 50
-        box_x = (self.config.screen_width - box_w) // 2
-        box_y = 320
-        pygame.draw.rect(self.screen, (30, 20, 50), (box_x, box_y, box_w, box_h))
-        pygame.draw.rect(self.screen, (120, 100, 160), (box_x, box_y, box_w, box_h), 2)
-
-        # Seed text with cursor
-        cursor = "|" if (pygame.time.get_ticks() // 500) % 2 == 0 else ""
-        text_surf = self._input_font.render(
-            self._seed_text + cursor, True, (230, 220, 245)
-        )
-        self.screen.blit(text_surf, (box_x + 12, box_y + 10))
-
-        hint = self._loading_font.render(
-            "按 Enter 确认 | 按 R 生成随机种子", True, (100, 90, 120)
-        )
-        hx = (self.config.screen_width - hint.get_width()) // 2
-        self.screen.blit(hint, (hx, 400))
+        assert self.main_menu is not None
+        self.main_menu.render(self.screen)
 
     def _render_loading(self) -> None:
         assert self.screen is not None
         assert self._loading_font is not None
 
-        self.screen.fill((10, 5, 20))
+        self.screen.fill((50, 40, 55))
 
         dots = "." * self._loading_dots
-        text = self._loading_font.render(f"正在生成{dots}", True, (160, 140, 200))
+        text = self._loading_font.render(f"正在生成{dots}", True, (220, 190, 210))
         tx = (self.config.screen_width - text.get_width()) // 2
         self.screen.blit(text, (tx, self.config.screen_height // 2 - 15))
 
@@ -563,9 +516,7 @@ class Engine:
         # HUD
         if self.coordinator:
             assert self.hud is not None
-            self.hud.render(
-                self.screen, self.coordinator.state.sanity, self.coordinator.state.favor
-            )
+            self.hud.render(self.screen, self.coordinator.state.affection)
 
         # Dialogue
         if self.phase in (GamePhase.DIALOGUE, GamePhase.TRANSITION):
@@ -577,29 +528,24 @@ class Engine:
             assert self.choice_menu is not None
             self.choice_menu.render(self.screen)
 
-    def _render_game_over(self) -> None:
+    def _render_ending(self) -> None:
         assert self.screen is not None
         assert self._title_font is not None
-        assert self._input_font is not None
+        assert self._loading_font is not None
 
-        self.screen.fill((5, 0, 10))
+        self.screen.fill((55, 40, 50))
 
-        go_text = self._title_font.render("GAME OVER", True, (180, 30, 30))
-        gx = (self.config.screen_width - go_text.get_width()) // 2
-        self.screen.blit(go_text, (gx, 250))
+        # "- Fin -"
+        fin_text = self._title_font.render("- Fin -", True, (255, 210, 220))
+        fx = (self.config.screen_width - fin_text.get_width()) // 2
+        self.screen.blit(fin_text, (fx, 280))
 
-        # Show memory fragments
-        if self.coordinator and self.coordinator.state.memory_fragments:
-            assert self._loading_font is not None
-            y = 350
-            header = self._loading_font.render("记忆碎片:", True, (140, 120, 160))
-            self.screen.blit(header, (200, y))
-            y += 35
-            for frag in self.coordinator.state.memory_fragments[-5:]:
-                frag_surf = self._loading_font.render(frag[:60], True, (110, 100, 130))
-                self.screen.blit(frag_surf, (220, y))
-                y += 28
+        # Thank you message
+        thanks = self._loading_font.render("感谢你的游玩", True, (200, 175, 190))
+        tx = (self.config.screen_width - thanks.get_width()) // 2
+        self.screen.blit(thanks, (tx, 370))
 
-        restart = self._input_font.render("点击任意处重新开始", True, (120, 100, 140))
-        rx = (self.config.screen_width - restart.get_width()) // 2
-        self.screen.blit(restart, (rx, self.config.screen_height - 100))
+        # Hint
+        hint = self._loading_font.render("点击任意处返回主菜单", True, (150, 130, 145))
+        hx = (self.config.screen_width - hint.get_width()) // 2
+        self.screen.blit(hint, (hx, self.config.screen_height - 100))

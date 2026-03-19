@@ -2,7 +2,7 @@
 
 Each save slot is a single JSON file stored in  <project_root>/.saves/
 containing the *complete* reconstructible game state:
-  - GameState (sanity, favor, round, history, memory_fragments)
+  - GameState (affection, round, history, memory_fragments)
   - CharacterProfile
   - All local asset paths (sprite + bg_cache)
   - Current SceneData + dialogue index
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-SAVE_VERSION = "1.0"
+SAVE_VERSION = "2.0"
 SLOT_NAMES = ["QUICK", "1", "2", "3"]
 
 
@@ -48,8 +48,7 @@ class SaveData:
     seed_hash: str
     atmosphere: str
     # GameState
-    sanity: int
-    favor: int
+    affection: int
     round_number: int
     history: list[str]
     memory_fragments: list[str]
@@ -73,6 +72,12 @@ class SaveData:
     @staticmethod
     def from_json(text: str) -> SaveData:
         d = json.loads(text)
+        # Migration from v1.0: drop removed fields
+        d.pop("sanity", None)
+        d.pop("favor", None)
+        d.pop("is_game_over", None)
+        if "affection" not in d:
+            d["affection"] = 0
         return SaveData(**d)
 
 
@@ -121,8 +126,7 @@ class SaveSystem:
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M"),
             seed_hash=coordinator.seed_hash,
             atmosphere=coordinator.atmosphere,
-            sanity=st.sanity,
-            favor=st.favor,
+            affection=st.affection,
             round_number=st.round_number,
             history=list(st.history),
             memory_fragments=list(st.memory_fragments),
@@ -169,8 +173,7 @@ class SaveSystem:
                 "slot": slot,
                 "timestamp": d.get("timestamp", ""),
                 "round": str(d.get("round_number", 0)),
-                "sanity": str(d.get("sanity", 0)),
-                "favor": str(d.get("favor", 0)),
+                "affection": str(d.get("affection", d.get("favor", 0))),
                 "char": d.get("character_data", {}).get("name", "???"),
                 "thumbnail_b64": d.get("thumbnail_b64") or "",
             }
@@ -186,13 +189,11 @@ class SaveSystem:
         coordinator.seed_hash = data.seed_hash
         coordinator.atmosphere = data.atmosphere
         st = coordinator.state
-        st.sanity = data.sanity
-        st.favor = data.favor
+        st.affection = data.affection
         st.round_number = data.round_number
         st.history = list(data.history)
         st.memory_fragments = list(data.memory_fragments)
         st.is_ending = data.is_ending
-        st.is_game_over = False
 
         # Restore character
         if data.character_data:

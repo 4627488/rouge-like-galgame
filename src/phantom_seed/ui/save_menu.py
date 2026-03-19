@@ -216,13 +216,13 @@ class SaveMenuOverlay:
         px = (self.sw - pw) // 2
         py = (self.sh - ph) // 2
         panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
-        panel.fill((18, 12, 32, 245))
+        panel.fill((45, 30, 50, 245))
         screen.blit(panel, (px, py))
-        pygame.draw.rect(screen, (130, 90, 200), (px, py, pw, ph), 2)
+        pygame.draw.rect(screen, (200, 140, 170), (px, py, pw, ph), 2)
 
         # Title
         title_text = "─── 存  档 ───" if is_save else "─── 读  档 ───"
-        t = self._font_title.render(title_text, True, (200, 160, 255))
+        t = self._font_title.render(title_text, True, (255, 200, 220))
         screen.blit(t, (px + (pw - t.get_width()) // 2, py + 18))
 
         # Hint
@@ -241,8 +241,8 @@ class SaveMenuOverlay:
             self._slot_rects.append((slot, rect))
 
             hover = i == self._slot_hover
-            bg = (40, 25, 65, 220) if hover else (25, 16, 42, 200)
-            border = (180, 130, 255) if hover else (70, 50, 100)
+            bg = (80, 50, 70, 220) if hover else (55, 35, 50, 200)
+            border = (220, 160, 190) if hover else (100, 70, 90)
 
             slot_surf = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
             slot_surf.fill(bg)
@@ -278,9 +278,9 @@ class SaveMenuOverlay:
                 screen.blit(char_name, (rect.x + tx_off, rect.y + 28))
 
                 meta = self._font_small.render(
-                    f"第 {info['round']} 幕   SAN {info['sanity']}   FAV {info['favor']}",
+                    f"第 {info['round']} 幕   好感度 {info['affection']}",
                     True,
-                    (140, 130, 160),
+                    (180, 150, 170),
                 )
                 screen.blit(meta, (rect.x + tx_off, rect.y + 56))
 

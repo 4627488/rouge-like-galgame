@@ -77,21 +77,21 @@ class CharacterProfile(BaseModel):
 # Fallback template for when AI generation fails
 FALLBACK_SCENE = SceneData(
     scene_id="fallback_001",
-    background="dark_room",
+    background="sunny classroom with warm light streaming through windows",
     visual_type=VisualType.SPRITE_SCENE,
     script=[
         DialogueLine(
             speaker="???",
-            text="......信号似乎不太稳定。",
-            inner_monologue="周围一片漆黑，什么也看不清。",
+            text="你在看什么呢？",
+            inner_monologue="阳光从窗外洒进来，空气中飘着淡淡的花香。",
         ),
         DialogueLine(
             speaker="???",
-            text="请稍等，让我重新建立连接。",
+            text="嘛，没关系。稍等一下哦。",
         ),
     ],
     choices=[
-        Choice(text="再试一次", target_state_delta={}),
-        Choice(text="放弃这条路", target_state_delta={"sanity": -5}),
+        Choice(text="搭话试试", target_state_delta={"affection": 2}),
+        Choice(text="安静地等待", target_state_delta={}),
     ],
 )

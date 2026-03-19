@@ -50,6 +50,10 @@ class DialogueBox:
         self.tick_timer = 0
         self.finished = False
 
+    def set_text_speed(self, ms: int) -> None:
+        """Set the typewriter tick interval in milliseconds. 0 = instant."""
+        self.tick_interval_ms = ms
+
     def skip(self) -> None:
         """Skip typewriter and show full text immediately."""
         self.char_index = len(self.full_text)
@@ -76,19 +80,19 @@ class DialogueBox:
 
         # Semi-transparent box
         box_surf = pygame.Surface((self.box_w, self.box_height), pygame.SRCALPHA)
-        box_surf.fill((10, 10, 30, 200))
+        box_surf.fill((45, 35, 50, 200))
         pygame.draw.rect(
-            box_surf, (100, 100, 140, 180), (0, 0, self.box_w, self.box_height), 2
+            box_surf, (180, 140, 170, 180), (0, 0, self.box_w, self.box_height), 2
         )
         screen.blit(box_surf, (self.margin, self.box_y))
 
         # Speaker name
         if self.speaker:
             name_bg = pygame.Surface((len(self.speaker) * 20 + 24, 30), pygame.SRCALPHA)
-            name_bg.fill((40, 20, 60, 220))
+            name_bg.fill((80, 50, 70, 220))
             screen.blit(name_bg, (self.margin + 16, self.box_y - 15))
 
-            name_surf = self.name_font.render(self.speaker, True, (240, 200, 255))
+            name_surf = self.name_font.render(self.speaker, True, (255, 210, 230))
             screen.blit(name_surf, (self.margin + 28, self.box_y - 12))
 
         # Main text (typewriter)

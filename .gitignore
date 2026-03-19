@@ -20,3 +20,6 @@ wheels/
 .idea/
 .vscode/
 *.swp
+
+# data
+.*/

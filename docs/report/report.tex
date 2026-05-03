@@ -1,0 +1,495 @@
+% !TEX program = xelatex
+% ============================================================
+%  Phantom Seed —— 基于多 Agent 协同的互动叙事游戏生成系统
+%  AIGC 课程小组项目报告
+% ============================================================
+\documentclass[12pt,a4paper]{article}
+
+% --------------------- 中文与字体 ---------------------
+\usepackage[UTF8, scheme=plain]{ctex}
+\usepackage{xeCJK}
+
+% --------------------- 页面与排版 ---------------------
+\usepackage[a4paper, left=2.4cm, right=2.4cm, top=2.6cm, bottom=2.6cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{parskip}
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{2em}
+% 中英文混排时允许段落弹性拉伸，减少 Overfull hbox
+\setlength{\emergencystretch}{3em}
+\tolerance=3000
+\hbadness=3000
+
+% --------------------- 数学与符号 ---------------------
+\usepackage{amsmath, amssymb, amsthm}
+
+% --------------------- 图像与表格 ---------------------
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{caption}
+\captionsetup{font=small, labelfont=bf, labelsep=quad}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+% 允许 \texttt 内容按斜杠/短横/下划线断行
+\newcommand{\brk}{\discretionary{}{}{}}
+
+% --------------------- 颜色 ---------------------
+\usepackage{xcolor}
+\definecolor{accent}{HTML}{1F6FEB}
+\definecolor{codegray}{HTML}{EEEEEE}
+
+% --------------------- 代码 ---------------------
+\usepackage{listings}
+\lstset{
+    basicstyle=\small\ttfamily,
+    backgroundcolor=\color{codegray!55},
+    breaklines=true,
+    columns=fullflexible,
+    keepspaces=true,
+    frame=single,
+    framerule=0pt,
+    xleftmargin=0.8em,
+    xrightmargin=0.8em,
+    aboveskip=0.8em,
+    belowskip=0.8em,
+    showstringspaces=false,
+    tabsize=2,
+    extendedchars=true,
+    inputencoding=utf8,
+    literate=%
+        {├}{{\textbar--}}2
+        {─}{{--}}1
+        {└}{{\textbackslash--}}2
+        {—}{{---}}1
+        {→}{{$\to$}}1
+        {↔}{{$\leftrightarrow$}}1
+        {≥}{{$\geq$}}1
+        {≤}{{$\leq$}}1,
+    commentstyle=\color{gray!90}\itshape,
+    keywordstyle=\color{accent}\bfseries,
+    stringstyle=\color{teal}
+}
+
+% --------------------- 超链接 ---------------------
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=accent,
+    urlcolor=accent,
+    citecolor=accent,
+    bookmarksnumbered=true
+}
+
+% --------------------- 图像路径 ---------------------
+% docs/report/report.tex 相对 docs/slidev-app/public/figures 与 screenshot/
+\graphicspath{%
+  {../slidev-app/public/figures/}%
+  {../../screenshot/}%
+}
+
+% --------------------- 标题信息 ---------------------
+\title{\vspace{-1.2cm}
+    \textbf{Phantom Seed：基于多 Agent 协同的互动叙事游戏生成系统}\\[0.3em]
+    \large AIGC 课程小组项目报告
+}
+\author{小组成员：\texttt{黄耘青 何东泽 赵乐坤 吴承骏}}
+\date{\today}
+
+% ============================================================
+\begin{document}
+
+% --------------------- 封面（独占一页） ---------------------
+\begin{titlepage}
+    \thispagestyle{empty}
+    \vspace*{\fill}
+    \begin{center}
+        {\Huge\bfseries Phantom Seed}\\[0.8em]
+        {\Large 基于多 Agent 协同的互动叙事游戏生成系统}\\[2.5em]
+        {\large AIGC 课程小组项目报告}\\[6em]
+
+        \begin{tabular}{rl}
+            \textbf{小组成员}\quad & 黄耘青\quad 何东泽\quad 赵乐坤\quad 吴承骏 \\[0.6em]
+            \textbf{报告日期}\quad & \today \\
+        \end{tabular}
+    \end{center}
+    \vspace*{\fill}
+\end{titlepage}
+
+% --------------------- 摘要（独占一页） ---------------------
+\thispagestyle{empty}
+\begin{center}
+    {\LARGE\bfseries 摘\quad 要}
+\end{center}
+\vspace{1em}
+
+这学期的 AIGC 课程作业我们交的是 Phantom Seed。它其实是一个把 Roguelike 的"每局重开"结构塞进 Galgame 演出壳子里的小实验：每开一局都会随机抽一个种子，然后让大模型在游戏运行时顺着种子把女主、剧情、分支和画面一点点吐出来，再通过 \texttt{pygame-ce} 渲染成一个可以真的点着玩下去的视觉小说。
+
+过程中我们很快发现，靠一次性 prompt 是做不出稳定剧情的，于是把任务拆成了 Planner、Writer、Critic、Reviewer 四个角色，让它们围着一个叫 \texttt{SceneData} 的结构化协议来回打配合，再配上共享状态、本地质量门控、异步预取、fallback 场景这些兜底措施，才让整件事勉强"可运行"。
+
+这份报告记录了这一路做下来的思路和取舍——不是说我们的方案多漂亮，而是想说明一件事：互动叙事这种带状态、多约束、还得跟画面与玩家选择对齐的任务，多 Agent 协同 + 结构化协议的组合，确实比单次生成更贴合场景。
+
+\vspace{2em}
+\noindent\textbf{关键词：} AIGC；多 Agent 协同；互动叙事；视觉小说；结构化输出；多模态生成；Roguelike
+
+\newpage
+
+% --------------------- 目录（独占一页） ---------------------
+\thispagestyle{empty}
+\tableofcontents
+\newpage
+
+% --------------------- 正文开始，页码归零 ---------------------
+\setcounter{page}{1}
+
+% ============================================================
+\section{引言}
+
+\subsection{这个项目是怎么来的}
+大模型生成的文字和图我们见过很多，但绝大多数时候它们停在一个离线 demo 里：复制一段 prompt、拿到一段结果、截图发群里，就结束了。一旦想把 AIGC 搬进一个"需要持续运行、有状态、还要跟玩家交互"的场景，问题就会一下子多出来——比如模型这次输出和上一次对不上、比如它写着写着把人设忘了、比如文字和画面之间没人统一口径。
+
+我们希望这次作业不是再做一个"看起来很酷的 prompt"，而是老老实实做一个\emph{能点着玩}的东西。视觉小说是一个很合适的选择：它天然就是"剧情 + 角色 + 画面 + 选项"的组合，对生成式 AI 的各种短板都有明确的压力。如果能让一整条生成链在它上面跑通，那 AIGC 落地到应用层这件事就不是空话。
+
+\subsection{我们想解决的三件事}
+具体来说我们想解决三件事：
+第一，让 AI 生成的内容真的进到游戏流程里，而不是 prompt playground 里的一段文本；
+第二，让文本、图像和玩家选择形成一个闭环，玩家点一下，后续生成就会顺着这一下走；
+第三，大模型本身并不稳，所以就算某一轮输出坏了，程序也不能崩——整件事得能撑得住跑一个完整的 demo。
+
+\subsection{本文的结构}
+后面我们大致按下面这个顺序讲：第\,\ref{sec:overview}\,节先交代一下整个系统长什么样；第\,\ref{sec:multiagent}\,节谈为什么要拆成多 Agent；第\,\ref{sec:protocol}\,节讲结构化协议和共享记忆；第\,\ref{sec:multimodal}\,节讲多模态怎么组合起来；第\,\ref{sec:engineering}\,节讲工程上的那些"脏活"；第\,\ref{sec:ui}\,节讲 UI 与交互；第\,\ref{sec:demo}\,节贴一些实际运行的效果；第\,\ref{sec:limits}\,节说实话聊聊现在还差什么；最后第\,\ref{sec:conclusion}\,节收个尾。
+
+% ============================================================
+\section{系统总览}
+\label{sec:overview}
+
+\subsection{作品形态}
+Phantom Seed 的基本玩法是：启动时进主菜单，点"开始新游戏"后随机出一个种子，根据这个种子生成多名女主的人设和立绘，接着 AI 生成第一幕剧情、对白脚本、选项和主视觉，玩家点选项 $\Rightarrow$ 状态发生变化 $\Rightarrow$ AI 生成下一幕 $\Rightarrow$ 继续推进；几幕之后进入所谓"锁线"阶段，剧情会围绕当前好感最高的女主展开，最终走向对应线路的高潮与结局。换句话说，每局都是由种子派生出来、由 AI 现场编排的一段独立剧情，而不是预先写死的脚本。
+
+\subsection{技术栈}
+整个项目基于 Python 3.11 以上版本，主循环和渲染用 \texttt{pygame-ce}，schema 定义和校验用 \texttt{pydantic}，图像处理用 \texttt{Pillow}，立绘抠图用 \texttt{rembg[cpu]} + \texttt{onnxruntime}，大模型和图像模型统一走 OpenRouter 的 Chat / Image API。选这一套主要是因为够轻、够能跑，基本没有平台依赖。
+
+\subsection{目录结构}
+代码上整个 \texttt{src/phantom\_seed} 划分成五个子包，职责都比较清晰：
+
+\begin{lstlisting}[language=bash]
+src/phantom_seed/
+|-- ai/        # LLM 客户端、图像生成、Prompt、Chain、协议定义
+|-- core/      # 游戏状态、种子逻辑、协调器、Roguelike 规则、存档系统
+|-- pipeline/  # 异步生成流程（下一幕预取）
+|-- ui/        # pygame UI、场景渲染、菜单、HUD、对话框、转场
+\-- main.py    # 程序入口
+\end{lstlisting}
+
+逻辑上所有跨模块的事情都归到一个叫 \texttt{GameCoordinator} 的中心对象里：人设由 \texttt{CharacterChain} 生，剧情由 \texttt{SceneChain} 生，图由 \texttt{ImagenClient} 生，游戏状态由 \texttt{GameState} 管。UI 层其实只需要跟 \texttt{GameCoordinator} 打交道，不用关心底下是怎么拼起来的。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\textwidth]{agent-workflow.png}
+    \caption{Phantom Seed 的 Planner / Writer / Critic / Reviewer 四角色工作流。}
+    \label{fig:arch}
+\end{figure}
+
+% ============================================================
+\section{为什么要拆成多 Agent}
+\label{sec:multiagent}
+
+\subsection{一次性生成的坑}
+最早我们试过最朴素的做法：把所有上下文塞进一个 prompt，让模型一次把 \texttt{SceneData} 整体吐出来。这种思路的优点是简单，缺点是它会把几件完全不同的事情搅在一起——模型既要把"这一幕要干什么"想清楚，又要把"怎么把它写好看"做出来，还要顺便把"分支设计、连续性、要回收哪些伏笔"都照顾到。
+
+结果就是：文字单看很流畅，但常常跑偏；上一幕留下的钩子下一幕经常不接；分支选项有时候两个选了都一样。而且一旦这一整段输出有问题，你也不知道是哪一步出了事，只能让它整块重试，成本还挺高。
+
+\subsection{四个角色的分工}
+所以我们换了个思路，把"生成一幕"拆成四步，每一步都是同一个大模型的不同 prompt 实例，相当于请模型扮演四个不同的角色：
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{角色} & \textbf{管什么} & \textbf{输出}\\
+\midrule
+\texttt{Planner}   & 这一幕要干嘛、节拍怎么走、哪些信息必须延续 & \texttt{ScenePlan}\\
+\texttt{Writer}    & 把 plan 展开为 20--50 条对白和舞台命令 & \texttt{SceneData} 草稿\\
+\texttt{Critic}    & 给草稿打分，指出阻断性问题和改进方向  & \texttt{SceneCritique}\\
+\texttt{Reviewer}  & 综合 plan / draft / critique 产出定稿 & 最终 \texttt{SceneData}\\
+\bottomrule
+\end{tabularx}
+\caption{四个角色分别负责"规划、写、挑刺、收尾"。}
+\end{table}
+
+整条链的思路很朴素：\emph{先想清楚再动笔，写完先自检再交差}。代码在 \texttt{ai/chains/scene\_chain.py}，里面 \texttt{SceneChain.invoke} 会在最多 \texttt{scene\_max\_revision\_rounds} 轮里反复调度 Writer 和 Critic，直到分数过了阈值或到达上限，然后交给 Reviewer 做最后定稿。
+
+这种拆法最直接的好处是：当某一幕不对劲的时候，我们可以准确地定位到是哪一段出了问题——是 plan 本身没想清楚，还是写作阶段跑偏了，还是 critic 给了错误的反馈。排查时比一团自由文本清爽得多。
+
+\subsection{借鉴自 LangChain 的一些机制}
+我们没有直接依赖 LangChain，因为它对我们这种规模的项目来说过重。但在设计时借用了这类框架里几个常见的思路：每个阶段都用 \texttt{pydantic} 做强 schema 校验，让输出"要么是合法结构、要么报错"；各阶段之间走状态化的工作流，每轮都能看到上一轮留下的产物；模型调用带 \texttt{stream\_progress} 回调，方便 UI 实时提示"现在在想什么"；每个阶段记一条 \texttt{AgentStageTrace}，方便事后复盘 token 和耗时；最后是一道"Critic 打分 + 本地启发式"组成的质量门控，两道闸门一起决定是否需要重写。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\textwidth]{langchain-mechanisms.png}
+    \caption{项目里用到的五个"类 LangChain"机制。}
+    \label{fig:langchain}
+\end{figure}
+
+% ============================================================
+\section{结构化协议与共享记忆}
+\label{sec:protocol}
+
+\subsection{一张共享的"黑板"}
+多个 Agent 能协同起来的前提，是它们看到的上下文是一致的。我们在 \texttt{core/state.py} 里用一个 \texttt{GameState} 对象承载这一切：角色档案、当前路线阶段、好感度、历史摘要、记忆碎片、连续性备注、未回收伏笔、最近去过的地点、上一幕留下的钩子——所有会影响后续生成的信息，都统一放这里，每一次调用时被序列化成 prompt 的一部分塞给模型。
+
+这就是所谓的黑板式设计：Planner 需要时来这里看、Writer 写的时候来这里对、Reviewer 定稿时再来这里核一遍。某种意义上，这个 \texttt{GameState} 才是整个系统真正的"脑子"，模型只是在上面来回润色的工具。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.82\textwidth]{shared-memory.png}
+    \caption{所有 Agent 共享的状态黑板示意。}
+    \label{fig:memory}
+\end{figure}
+
+\subsection{结构化协议 SceneData}
+我们没让模型输出自由文本，而是在 \texttt{ai/protocol.py} 里把"一幕剧情"定义成了一个 pydantic 结构：
+
+\begin{lstlisting}[language=Python]
+class SceneData(BaseModel):
+    scene_id: str
+    background: str = ""
+    visual_type: VisualType = VisualType.SPRITE_SCENE
+    stage_commands: list[StageCommand] = []   # 角色出入场/走位
+    script: list[DialogueLine] = []           # 对白/心声/转场
+    climax_cg_prompt: str = ""                # 仅在 CINEMATIC_CG 使用
+    choices: list[Choice] = []
+    game_state_update: GameStateUpdate = ...  # is_climax / is_ending
+    scene_goal: str = ""
+    emotional_shift: str = ""
+    continuity_notes: list[str] = []          # 后续必须记住的事实
+    open_threads: list[str] = []              # 未回收伏笔
+    next_hook: str = ""                       # 给下一幕的情绪钩子
+\end{lstlisting}
+
+这个协议一开始我们也纠结过要不要做这么细，最后发现字段越细反而越省事：渲染层不用"猜"模型意图，直接按字段走就行；下一幕生成时，也能把 \texttt{continuity\_notes} 和 \texttt{open\_threads} 直接拼进 prompt，让连续性问题有明确的落脚点；而所有 pydantic 校验失败的情况，我们都能立即感知、立即兜底，不会让坏数据进到游戏状态里去。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\textwidth]{scene-protocol.png}
+    \caption{\texttt{SceneData} 字段视图。}
+    \label{fig:proto}
+\end{figure}
+
+\subsection{双层质量门控}
+光靠 Critic 打分其实不够保险——它本身也是个大模型，有时会"觉得不错"但实际上不达标。所以我们在 \texttt{scene\_chain.py} 里写了一个 \texttt{\_passes\_local\_quality\_gate}，用几条硬规则做二次验证：对白至少 20 条、场景切换至少 2 次、选项至少 2 个、\texttt{scene\_goal} 和 \texttt{next\_hook} 不能为空。任一条不满足就视为失败，让 Writer 重写。
+
+这种"模型主观 + 本地客观"两道闸门搭着用的做法，后面证明是必要的：它不仅拦掉了一些 Critic 没看出来的问题，也让我们对整条链的产出分布有了量化概念。
+
+% ============================================================
+\section{多模态协同}
+\label{sec:multimodal}
+
+\subsection{不止文本}
+视觉小说本质上不是个文字游戏——它得有画面。Phantom Seed 里画面由两类图组成：一类是背景和高潮 CG，一类是女主的立绘。两者都由 AI 现场生成，立绘在游戏开局时一次性全部生成完（三位女主并发），背景则根据每一幕的 \texttt{background} 字段按需生成，带 prompt 缓存。
+
+这样一来，一幕的完整流程其实是：\texttt{SceneChain} 先把剧情和视觉描述生出来 $\rightarrow$ \texttt{ImagenClient} 根据视觉描述拿到背景图 / CG $\rightarrow$ UI 根据 \texttt{stage\_commands} 把立绘摆到位、根据 \texttt{script} 逐句显示对白 $\rightarrow$ 玩家点选项 $\rightarrow$ 选项的 \texttt{target\_state\_delta} 改写 \texttt{GameState} $\rightarrow$ 再回到 \texttt{SceneChain} 开下一幕。整个过程是个闭环，没有哪一块是单独在 prompt 里生成完就结束的。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\textwidth]{multimodal-loop.png}
+    \caption{文本、图像、UI、玩家选择构成的闭环。}
+    \label{fig:mm}
+\end{figure}
+
+\subsection{图像生成的几个细节}
+图像侧的代码都在 \texttt{ai/imagen\_client.py} 里，实际踩过的坑并不少：
+
+不同模型吐出的立绘姿势、构图、风格差异很大，直接放到同一张舞台上会显得格格不入，所以我们统一把立绘渲染到 $1024 \times 1536$ 的画布上，底部留出脚部安全区，左右两侧按比例留边，让同一幕里的不同女主放在一起时比例和站位是可控的。抠图我们集成了 \texttt{rembg[cpu]} 和"角点洪泛去白底"两套方案，默认走后者（快），失败时回退到前者。Prompt 模板放在 \texttt{ai/prompts/visual.py}，反复强调"日本动漫 galgame 画风"这件事——这种风格锚定看起来很啰嗦，但它确实能显著降低风格漂移。
+
+最后所有图片都用 prompt 的 SHA256 前 16 位做文件名，落盘到 \texttt{.cache/images/}，命中时直接读本地，不重发请求。这一条在反复调试剧情时意义巨大，否则每次重跑都得重新烧一轮图的钱。
+
+\subsection{模型选择}
+默认的模型配置在 \texttt{config.py} 里，也可以通过 \texttt{.env} 覆盖：
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\small
+\begin{tabular}{@{}p{3.8cm} p{5.8cm} p{4.8cm}@{}}
+\toprule
+\textbf{用途} & \textbf{默认模型} & \textbf{环境变量}\\
+\midrule
+主文本模型\newline (Plan/\brk Critic/\brk Review) &
+\texttt{x-ai/\brk grok-4.1-fast} &
+\texttt{OPENROUTER\_\brk TEXT\_MODEL}\\
+草稿文本模型 (Writer) &
+\texttt{google/\brk gemini-3-\brk flash-preview} &
+\texttt{OPENROUTER\_\brk DRAFT\_\brk TEXT\_MODEL}\\
+主图像模型 &
+\texttt{google/\brk gemini-3.1-\brk flash-\brk image-preview} &
+\texttt{OPENROUTER\_\brk IMAGE\_MODEL}\\
+宣传图 / CG 模型 &
+\texttt{google/\brk gemini-3-\brk pro-image-preview} &
+\texttt{OPENROUTER\_\brk PROMO\_\brk IMAGE\_MODEL}\\
+\bottomrule
+\end{tabular}
+\caption{默认模型配置：轻量模型负责大量草稿，主模型负责规划与定稿。}
+\end{table}
+
+做这种分层其实是出于现实考虑：Writer 这一步每一幕要吐 20--50 条对白，token 用量最大，用便宜快速的模型；而 Planner、Critic、Reviewer 都是"想"的工作而不是"写"的工作，输出 token 少但对质量要求高，就用贵一点的主模型。这种搭配下，一幕完整生成的体感大概在十秒到二十秒之间，能接受。
+
+% ============================================================
+\section{工程上那些不太性感但必须做的事}
+\label{sec:engineering}
+
+\subsection{异步预取}
+游戏里玩家一般要花几十秒去读完一幕对白，而 AI 生成下一幕本身也要十几秒——这两段时间其实可以重叠。所以 \texttt{pipeline/async\_gen.py} 里起了一个后台线程，在玩家开始读当前幕时就默默把下一幕先生好，等玩家点到最后一句话的时候，下一幕的 \texttt{SceneData} 已经躺在内存里了。
+
+细节上有几个坑要注意：玩家如果快速跳章或 backlog 回看，可能会触发多次生成请求，所以我们用 \texttt{request\_id} 做过期检查，旧结果会被丢掉；后台线程抛异常时不要让整个程序跟着死，我们在里面做了捕获，把异常记到 \texttt{\_error} 上，主线程发现后降级走 fallback。终端侧为了调试方便还自己写了一个单行进度条，样式参考了 pip 的风格。
+
+\subsection{背景缓存与去重}
+\texttt{GameCoordinator} 里维护了 \texttt{\_bg\_cache} 和 \texttt{\_bg\_inflight} 两个字典：同一个背景描述第一次请求时正常发出，再来相同请求时——不管是同一幕的重复引用、还是不同幕的巧合复用——都会等第一个请求结束，共享它的结果。实现上借助的是 \texttt{threading.Event}，第二个线程过来看到 inflight 就阻塞等完成，避免把同一张图生两遍。
+
+\subsection{Fallback 场景}
+模型调用偶尔会超时、返回空、schema 校验失败，这些在生产里都很正常。我们在 \texttt{protocol.py} 里埋了一个 \texttt{FALLBACK\_SCENE} 常量：两句对白、两个选项，语义上是"女主温柔地示意你等一下"。任何一轮生成失败时程序都会退到这里，游戏不会卡死。这个兜底场景不是用来撑场面的，而是给玩家一个"生成失败了但你可以继续"的信号。
+
+\subsection{存档系统}
+\texttt{core/save\_system.py} 提供了四个存档槽位：\texttt{QUICK}、\texttt{1}、\texttt{2}、\texttt{3}，各自对应 \texttt{.saves/} 下一个 JSON 文件。存的不只是"好感度多少、在第几幕"这种数值，还把当前线路、角色档案、立绘路径、背景缓存、当前场景的完整 \texttt{SceneData}、对话索引、全量 backlog 和一张缩略图全都序列化进去。读档时相当于原地还原整个 \texttt{GameCoordinator} 的状态，玩家感知不到存档发生过。
+
+\subsection{种子与 Roguelike 结构}
+开局那个"随机种子"不是噱头。\texttt{core/\brk seed\_engine.py} 会把种子字符串做哈希，派生出初始氛围关键词和一串 trait code，三位女主各自再用 \texttt{hash\_seed(\brk seed\_string\brk\ +\ ":heroine:"\ +\ idx)} 取独立子种子——这样既保证同一 seed 下每位女主彼此随机性独立，又保证下次换相同种子能完全复现同一套女主。配合 \texttt{core/roguelike.py} 的随机事件和记忆碎片，每一局的基调、阵容、小事件都会不一样。
+
+\subsection{配置与设置}
+运行时参数集中在 \texttt{config.py}：窗口 $1280 \times 720$，60 FPS，默认文本速度、自动播放间隔、是否全屏、各模型名字，以及缓存目录位置。用户可调的那部分会持久化到项目根下的 \texttt{settings.json}，下次启动自动读回。
+
+% ============================================================
+\section{UI 与交互}
+\label{sec:ui}
+
+\subsection{渐进式披露}
+视觉小说表面上看起来是个很简单的界面：背景、立绘、对话框。但背后跑着的系统其实复杂得多——每一次模型调用的 token 使用、每一幕的 plan / critique、所有未回收的伏笔、好感度变化历史等等。如果一股脑全塞到主界面上，玩家什么都看不进去；如果藏得太深，开发和演示时又不方便排查。
+
+我们的取舍是：默认界面只保留对玩家直接有用的信息——背景、立绘、对白、好感度小条、章节名；生成过程中会出现简短的进度提示（"剧情规划中""模型处理中"之类），避免让人以为程序卡了；而真正详细的诊断数据——Agent trace、token 使用、fallback 次数等等——只有在开发者打开上下文菜单时才展开。演示给老师看的时候，既不会界面太乱，也能随时切到"幕后"给评委看实现细节。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\textwidth]{progressive-disclosure.png}
+    \caption{默认界面与"按需展开"诊断面板的对比。}
+    \label{fig:progressive}
+\end{figure}
+
+\subsection{UI 模块}
+pygame 侧的代码都在 \texttt{src/phantom\_seed/ui/} 下，一个文件负责一件事：
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+\textbf{文件} & \textbf{干什么}\\
+\midrule
+\texttt{engine.py}        & 主循环，事件分发，场景推进，菜单调用，存档交互\\
+\texttt{scene.py}         & 场景绘制：背景、立绘、舞台命令\\
+\texttt{dialogue.py}      & 对话框，打字机效果，speaker 显示\\
+\texttt{hud.py}           & 好感度、章节、路线状态显示\\
+\texttt{main\_menu.py}    & 主菜单：新游戏、读档、设置\\
+\texttt{menu.py}          & 上下文菜单（右键）\\
+\texttt{save\_menu.py}    & 存档 / 读档界面\\
+\texttt{settings\_menu.py}& 设置：文本速度、自动播放、全屏\\
+\texttt{transitions.py}   & 场景转场动画\\
+\texttt{assets.py}        & 图像 / 字体加载与缓存\\
+\texttt{fonts.py}         & 字体管理\\
+\bottomrule
+\end{tabularx}
+\caption{UI 子模块一览。}
+\end{table}
+
+\subsection{快捷键}
+考虑到汇报时老师可能要当场操作，快捷键设计也尽量接近商业 galgame：左键和空格推进对白、在打字效果中一键显示整句；F5 / F9 快速存读档；S / L 打开完整的存档 / 读档菜单；B 打开 backlog 回看已经读过的所有对白；右键打开上下文菜单。
+
+% ============================================================
+\section{运行效果}
+\label{sec:demo}
+
+\subsection{单角色场景}
+玩家开局进来，最先看到的一般是这种单人场景：AI 根据 \texttt{background} 字段生成的背景图垫底，立绘按 \texttt{stage\_commands} 指定的位置放在画面中央或侧边，对白框逐句打出 \texttt{script} 中的 \texttt{DialogueLine}。每点一次推进一条，读到最后一句时底部会弹出 \texttt{choices} 里的选项，玩家挑一个就会触发对应的 \texttt{target\_state\_delta}，好感度变化进而影响下一幕生成。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{1.png}
+    \caption{单角色场景：AI 生成的背景 + 立绘 + 对白 + 选项。}
+    \label{fig:shot-single}
+\end{figure}
+
+\subsection{多角色舞台调度}
+多人同框的场景更能体现结构化协议的价值。一幕里可能有两到三名女主同时在场，\texttt{stage\_\brk commands} 控制她们各自的入场、离场、走位和表情，\texttt{script} 通过 \texttt{scene\_\brk transition} 字段让背景切换和某一句对白对齐。UI 层根本不需要理解语义，它只是忠实地照着 \texttt{SceneData} 把命令一条条执行下去。
+
+这个过程里我们最明显的体会是：只要协议设计得足够稳，"剧情作者"和"舞台导演"之间的接缝就可以做得很窄——模型只管编故事，程序只管演给你看，中间不用来回猜。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{image.png}
+    \caption{多角色舞台调度：程序按 \texttt{stage\_commands} 控制站位与出入场。}
+    \label{fig:shot-multi}
+\end{figure}
+
+\subsection{另一幕}
+换一套背景和立绘搭配，整体 UI 仍然是同一份渲染逻辑。下图可以看出即便叙事氛围和场地完全不同，对话框、HUD 和选项的呈现都保持一致——这要归功于我们在协议层就把视觉差异"下沉"到了 \texttt{background} 和 \texttt{stage\_commands} 里，UI 本身对剧情是不敏感的。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{2.png}
+    \caption{另一幕运行截图：同一套 UI 适配不同背景与立绘。}
+    \label{fig:shot-2}
+\end{figure}
+
+% ============================================================
+\section{现在还差点什么}
+\label{sec:limits}
+
+作品跑是跑起来了，但我们自己最清楚它还差哪些东西。
+
+首先是图像风格一致性。虽然在 prompt 里反复强调"日本动漫 galgame 画风"，也做了立绘画布和抠图的统一处理，但不同轮次生成出来的女主放在一起，仍然能看出色调、线条粗细、面部比例上的细微差异，这对沉浸感是有损伤的。更彻底的方案应该是给每位女主固定一组视觉锚点（发色、瞳色、穿搭关键词）并在后续每一次立绘和 CG 生成里都强制复用这组锚点，甚至引入 reference image，而不是只靠文字 prompt 描述。
+
+其次是长剧情的连续性。一幕能塞给模型的历史摘要是有上限的，十几幕之后模型很容易把前面发生过的小事忘掉，出现"这件事你不是几幕前说过了吗"的违和感。我们现在的做法是把摘要做得尽量紧凑，但这只是在延后问题而已；更合理的做法是做一个独立的记忆管理 Agent，负责维护"短期完整记忆 + 长期抽象索引"两层结构，让 Writer 在需要时去查而不是每次都把历史整块带上。
+
+再次是多阶段生成的成本。Plan + Draft + Critic + Review 意味着一幕要调四次大模型，加上偶尔的 Writer 重试，一个完整 demo 跑下来 token 用量不小。我们目前用模型分层（贵模型想、便宜模型写）稍微缓解了一下，但整体上还是比"一次性生成"贵好几倍。这件事没有银弹，只能在质量和成本之间找平衡。
+
+最后是自动评测。现在项目里并没有一个完善的离线评测体系，质量判断主要靠 Critic 的主观评分和我们人肉 playtest。理想情况下应该引入一些结构化指标——比如连续性违反率、选项多样性、情感弧的平滑度——做离线批量跑数，这样改 prompt 或换模型时能有一个客观对比。这是下一步最想补上的一块。
+
+% ============================================================
+\section{结语}
+\label{sec:conclusion}
+
+这个作业做完之后，我们对一开始的问题有了自己的答案。
+
+把 AIGC 放进一个真实的互动应用里，难点其实不是"模型够不够强"，而是"怎么让模型的输出可以被程序稳定消费"。只要输出是结构化的、校验是严的、状态是共享的，就算模型本身有波动，整条链也能把自己稳住——反过来，哪怕用了最贵的模型，只要 UI 得自己去猜它到底想表达什么，这个系统就一定撑不了几分钟。
+
+多 Agent 协同这件事也不是为了"听起来很高级"。它的真实好处是把一个复杂任务分成几段：想、写、挑、收，每一段都只做一件事，做不好可以精准回滚。放在互动叙事这个场景里，它让我们终于有办法同时照顾"连贯性、分支设计、风格一致性和可扩展性"这几件原本互相打架的事情。
+
+最后，我们想把 PPT 末尾那段话再写一次作为总结：关键不在于模型写得多华丽，而在于\emph{输出能否被程序稳定消费、系统能否持续运行、玩家选择能否真正影响后续内容}——这三件事，才是我们这一学期真正想在 Phantom Seed 上证明的东西。
+
+% ============================================================
+\section*{附录：关键代码索引}
+\addcontentsline{toc}{section}{附录：关键代码索引}
+
+\begin{itemize}
+    \item \texttt{src/\brk phantom\_seed/\brk main.py} —— 启动入口，检查 \texttt{OPENROUTER\_\brk API\_KEY} 后创建游戏引擎；
+    \item \texttt{src/\brk phantom\_seed/\brk ui/\brk engine.py} —— 主循环、事件处理、场景切换、对话推进、菜单与存档交互；
+    \item \texttt{src/\brk phantom\_seed/\brk core/\brk coordinator.py} —— 协调角色生成、剧情生成、图像生成、状态推进与背景缓存；
+    \item \texttt{src/\brk phantom\_seed/\brk ai/\brk chains/\brk scene\_chain.py} —— Plan $\to$ Draft $\to$ Critique $\to$ Review 流水线；
+    \item \texttt{src/\brk phantom\_seed/\brk ai/\brk chains/\brk character\_chain.py} —— 种子 $\to$ 人设的结构化生成链；
+    \item \texttt{src/\brk phantom\_seed/\brk ai/\brk protocol.py} —— \texttt{SceneData}、\texttt{CharacterProfile}、\texttt{ScenePlan}、\texttt{SceneCritique}、\texttt{AgentStageTrace} 等 schema；
+    \item \texttt{src/\brk phantom\_seed/\brk ai/\brk imagen\_client.py} —— 图像生成、缓存、抠图与立绘标准化；
+    \item \texttt{src/\brk phantom\_seed/\brk pipeline/\brk async\_gen.py} —— 异步预取与终端进度条；
+    \item \texttt{src/\brk phantom\_seed/\brk core/\brk state.py} —— \texttt{GameState} 与章节 / 路线推进；
+    \item \texttt{src/\brk phantom\_seed/\brk core/\brk save\_system.py} —— 槽位化存档与 backlog；
+    \item \texttt{src/\brk phantom\_seed/\brk config.py} —— 配置中心：默认模型、窗口、缓存与设置持久化。
+\end{itemize}
+
+\vspace{1.5em}
+\begin{center}
+\itshape —— 完 ——
+\end{center}
+
+\end{document}

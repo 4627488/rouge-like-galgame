@@ -1,0 +1,59 @@
+# ---------- LaTeX build artifacts ----------
+# Core aux files
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex(busy)
+
+# BibTeX / biblatex
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+
+# Index / glossary
+*.idx
+*.ind
+*.ilg
+*.glo
+*.gls
+*.glg
+*.acn
+*.acr
+*.alg
+
+# Nomenclature / listings
+*.nav
+*.snm
+*.vrb
+*.nlo
+*.nls
+*.lol
+
+# Beamer / pdfTeX / xeTeX / LuaTeX misc
+*.figlist
+*.makefile
+*.xdv
+*.bak
+*.tmp
+*.swp
+*.dvi
+*.ps
+
+# latexmk caches
+*.latexmk
+.latexmk/
+
+# Editor / IDE caches
+_minted-*/
+_region_.tex
+auto/
+
+# Generated PDF (comment this line out if you want to commit the final PDF)
+*.pdf
